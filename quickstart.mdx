@@ -53,12 +53,12 @@ By the end of this guide you'll have `django-meta-whatsapp` installed, wired up 
     WHATSAPP = {
         "ACCESS_TOKEN": "EAA...",               # Meta system-user permanent access token
         "PHONE_NUMBER_ID": "1234567890",         # From the Meta developer dashboard
-        "WEBHOOK_VERIFY_TOKEN": "your_secure_random_string",
+        "VERIFY_TOKEN": "your_secure_random_string",
     }
     ```
 
     <Note>
-      **`ACCESS_TOKEN`** is the permanent (system-user) access token generated in the Meta Business Suite — **not** a short-lived user token. **`WEBHOOK_VERIFY_TOKEN`** is any secure random string you choose; Meta will send it back on webhook verification so your endpoint can confirm the request is genuine.
+      **`ACCESS_TOKEN`** is the permanent (system-user) access token generated in the Meta Business Suite — **not** a short-lived user token. **`VERIFY_TOKEN`** is any secure random string you choose; Meta will send it back on webhook verification so your endpoint can confirm the request is genuine.
     </Note>
   </Step>
 
@@ -83,7 +83,7 @@ By the end of this guide you'll have `django-meta-whatsapp` installed, wired up 
        ```
        https://yourdomain.com/whatsapp/webhook/
        ```
-       Use your `WEBHOOK_VERIFY_TOKEN` as the verification token when prompted by Meta.
+       Use your `VERIFY_TOKEN` as the verification token when prompted by Meta.
     4. Head to the **Templates** tab and click **Sync from Meta** to import your approved message templates.
     5. Open the **Inbox** — you're live!
   </Step>

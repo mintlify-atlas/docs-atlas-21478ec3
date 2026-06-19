@@ -19,6 +19,8 @@ Campaigns let you send a WhatsApp template message to a large audience at once. 
 | `parameter_mappings` | `JSONField` | Maps template variable index to a field name, e.g. `{"1": "name", "2": "order_id"}` |
 | `status` | `CharField` | `draft`, `scheduled`, `running`, `completed`, `failed`, or `paused` |
 | `scheduled_at` | `DateTimeField` | Optional future datetime for a scheduled send |
+| `started_at` | `DateTimeField` | Timestamp when the campaign began executing |
+| `completed_at` | `DateTimeField` | Timestamp when the campaign finished executing |
 | `total_count` | `PositiveIntegerField` | Total audience size resolved at run time |
 | `sent_count` | `PositiveIntegerField` | Messages accepted by Meta |
 | `delivered_count` | `PositiveIntegerField` | Delivery confirmations received via webhook |

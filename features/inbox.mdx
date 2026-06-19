@@ -1,5 +1,5 @@
 ---
-title: "Live WhatsApp Inbox — Real-Time Chat Interface"
+title: "Live WhatsApp Inbox — Real-Time Messaging Interface"
 sidebarTitle: "Inbox"
 description: "The unified inbox lets you read and reply to WhatsApp messages in real time, with media support, reply threading, and per-conversation labels."
 ---
@@ -20,7 +20,7 @@ The inbox is the live chat interface at `/whatsapp/inbox/`. It shows all convers
 
 Both params are handled by `InboxView` and can be combined:
 
-```
+```text
 /whatsapp/inbox/?q=rahul&label=vip
 ```
 
@@ -66,13 +66,22 @@ The reply reference is stored on the `WhatsAppMessage.reply_to` FK and rendered 
 
 Each conversation can carry a single label for triage and organisation. Labels are colour-coded and created at `/whatsapp/labels/`.
 
-To change a conversation's label, the UI sends an AJAX POST to:
+To change a conversation's label, the UI sends an AJAX POST to a URL backed by `UpdateConversationLabelView`. This view is not wired in the default URL conf — add it to your project's `urlpatterns`:
 
-```
-POST /whatsapp/inbox/<conv_pk>/label/
+```python
+# In your project's urls.py, after including the package URLs:
+from django_meta_whatsapp.views import UpdateConversationLabelView
+
+urlpatterns += [
+    path(
+        "whatsapp/inbox/<int:pk>/label/",
+        UpdateConversationLabelView.as_view(),
+        name="conversation_label_update",
+    ),
+]
 ```
 
-`UpdateConversationLabelView` handles this request and returns `{"status": "ok"}`. Send an empty `label` field to remove the label.
+The view accepts a POST with a `label` field (the label name) and returns `{"status": "ok"}`. Send an empty `label` field to remove the label.
 
 Labels have a `name` (unique) and a `color` — either a Tailwind preset name or a hex code. See the [Contacts page](/features/contacts) for the full list of preset colors.
 
@@ -93,6 +102,7 @@ Labels have a `name` (unique) and a `color` — either a Tailwind preset name or
 | `sticker` | Static or animated WhatsApp sticker |
 | `interactive` | Button list or product message |
 | `button` | Reply from a quick-reply button |
+| `unknown` | Unrecognised message type received from Meta |
 
 ## Media uploads
 

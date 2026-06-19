@@ -1,5 +1,5 @@
 ---
-title: "Contact Management — CRM for WhatsApp Contacts"
+title: "WhatsApp Contact Management — CRM for Your Contacts"
 sidebarTitle: "Contacts"
 description: "Manage your WhatsApp contact database: import from CSV, assign colored labels, filter by any field, track opt-outs, and export your entire list."
 ---
@@ -49,7 +49,7 @@ Phone,Name,Email,Labels
 
 **Download a sample CSV** to use as a template:
 
-```
+```text
 GET /whatsapp/contacts/import/?sample=1
 ```
 
@@ -59,13 +59,13 @@ This returns a ready-to-fill `sample_contacts.csv` file.
 
 Download your full contact list as a CSV:
 
-```
+```text
 GET /whatsapp/contacts/export/
 ```
 
 The exported file (`whatsapp_contacts.csv`) contains the following columns:
 
-```
+```text
 phone, name, email, labels, opted_out, created_at
 ```
 

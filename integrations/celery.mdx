@@ -1,7 +1,7 @@
 ---
-title: "Async Campaign Execution with Celery"
+title: "Async WhatsApp Campaign Execution with Celery Tasks"
 sidebarTitle: "Celery"
-description: "Enable Celery to run large WhatsApp campaigns asynchronously in the background, preventing web request timeouts for bulk sends."
+description: "Enable Celery to run large WhatsApp campaigns asynchronously in the background, preventing web request timeouts for bulk sends to large audiences."
 ---
 
 By default, campaigns run synchronously in the web process. For large audiences (hundreds or thousands of contacts), this causes web request timeouts and a poor user experience. Enable the optional Celery integration to queue campaigns as background tasks.

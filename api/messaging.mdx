@@ -31,7 +31,7 @@ Send a plain text WhatsApp message to any phone number.
 </ParamField>
 
 <ParamField body="account_id" type="integer">
-  Primary key of the `WhatsAppAccount` to send from. When omitted, the first active account is used automatically.
+  Primary key of the `WhatsAppAccount` to send from. When omitted, the view passes `account=None` to the send utility, which will use the default configured account.
 </ParamField>
 
 ### Example
@@ -152,11 +152,11 @@ Send an approved WhatsApp template message with optional variable substitution. 
 </ParamField>
 
 <ParamField body="body_params" type="string[]">
-  Ordered list of values to substitute into the template body's `{{1}}`, `{{2}}`, etc. placeholders. The first element fills `{{1}}`, the second fills `{{2}}`, and so on.
+  Ordered list of values to substitute into the template body's `{{1}}`, `{{2}}`, etc. placeholders. The first element fills `{{1}}`, the second fills `{{2}}`, and so on. Passed to `build_template_components(body_params=...)`.
 </ParamField>
 
 <ParamField body="header_params" type="string[]">
-  Ordered list of values for variables in the template header component, using the same positional convention as `body_params`.
+  Ordered list of values for variables in the template header component, using the same positional convention as `body_params`. Passed to `build_template_components(header_params=...)`.
 </ParamField>
 
 ### Example

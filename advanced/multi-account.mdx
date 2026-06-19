@@ -1,5 +1,5 @@
 ---
-title: "Multi-Account WhatsApp — Multiple Business Accounts in Django"
+title: "Multi-Account Support for WhatsApp Business in Django"
 sidebarTitle: "Multi-Account"
 description: "Run multiple WhatsApp Business Accounts from a single Django project, with per-account inboxes, campaigns, templates, and webhook routing."
 ---
@@ -72,10 +72,10 @@ If you only operate one WhatsApp Business Account, you can place credentials dir
 
 ```python settings.py
 WHATSAPP = {
-    "API_TOKEN": "EAA...",
+    "ACCESS_TOKEN": "EAA...",
     "PHONE_NUMBER_ID": "1234567890",
     "WABA_ID": "9876543210",
-    "WEBHOOK_VERIFY_TOKEN": "my_token",
+    "VERIFY_TOKEN": "my_token",
 }
 ```
 

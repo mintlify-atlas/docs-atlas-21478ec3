@@ -15,7 +15,7 @@ All configuration for `django-meta-whatsapp` lives in a single `WHATSAPP` dictio
   WHATSAPP = {
       "ACCESS_TOKEN": os.environ["META_WA_ACCESS_TOKEN"],
       "PHONE_NUMBER_ID": os.environ["META_WA_PHONE_NUMBER_ID"],
-      "WEBHOOK_VERIFY_TOKEN": os.environ["META_WA_VERIFY_TOKEN"],
+      "VERIFY_TOKEN": os.environ["META_WA_VERIFY_TOKEN"],
   }
   ```
 </Warning>
@@ -31,7 +31,7 @@ WHATSAPP = {
     "PHONE_NUMBER_ID": "1234567890",       # From the Meta developer dashboard
 
     # The verification token Meta sends on webhook setup — any random string you choose
-    "WEBHOOK_VERIFY_TOKEN": "your_secure_random_string",
+    "VERIFY_TOKEN": "your_secure_random_string",
 
     # ── Optional: WABA ID (needed for template sync) ─────────────
     "WABA_ID": "9876543210",               # WhatsApp Business Account ID
@@ -78,7 +78,7 @@ WHATSAPP_USE_CELERY = False
   The Phone Number ID associated with your WhatsApp Business number. Found in the **Meta developer dashboard** under your app's WhatsApp product section.
 </ParamField>
 
-<ParamField path="WEBHOOK_VERIFY_TOKEN" type="string" required>
+<ParamField path="VERIFY_TOKEN" type="string" required>
   Any secure random string of your choosing. Meta sends this value back when verifying the webhook endpoint URL — your endpoint checks it to confirm the request is genuine. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
 </ParamField>
 

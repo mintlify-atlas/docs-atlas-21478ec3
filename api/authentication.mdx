@@ -1,7 +1,7 @@
 ---
 title: "REST API Authentication — X-API-Key Header"
 sidebarTitle: "Authentication"
-description: "Authenticate django-meta-whatsapp REST API requests using an X-API-Key header. Generate API keys from the dashboard under Settings → API Keys."
+description: "Authenticate django-meta-whatsapp REST API requests using an X-API-Key header or api_key query param. Generate and manage keys under Settings → API Keys."
 ---
 
 All REST API endpoints in django-meta-whatsapp use API key authentication. Pass your key in the `X-API-Key` request header on every call. Keys are generated and managed from the dashboard under **Settings → API Keys** (`/whatsapp/settings/api-keys/`).
@@ -11,14 +11,14 @@ All REST API endpoints in django-meta-whatsapp use API key authentication. Pass 
 1. Open the dashboard at `/whatsapp/`
 2. Navigate to **Settings → API Keys → Add Key**
 3. Enter a descriptive name for the key (e.g. `"Production Backend"`, `"Mobile App"`)
-4. Copy the generated key immediately — it will not be shown again
+4. Copy the generated key and store it securely
 
 Each key is backed by the `WhatsAppAPIKey` model with the following fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | `CharField` | Human-readable label for identifying the key |
-| `key` | `CharField(64)` | UUID-based secret, unique, auto-generated on creation |
+| `key` | `CharField(max_length=64)` | UUID-based secret, unique, auto-generated on creation via `uuid.uuid4` |
 | `is_active` | `BooleanField` | Keys can be disabled without deleting, preserving audit history |
 | `created_at` | `DateTimeField` | Timestamp when the key was created |
 
@@ -38,6 +38,8 @@ curl -X POST https://yourdomain.com/whatsapp/api/send-message/ \
 ```bash
 curl "https://yourdomain.com/whatsapp/api/chats/?api_key=your-api-key"
 ```
+
+The authentication check (inside `_APIAuth._ok()`) accepts either form: it reads `request.headers.get("X-API-Key")` first, then falls back to `request.GET.get("api_key")`. The key is validated against active `WhatsAppAPIKey` records (`is_active=True`).
 
 ## API Base URL
 

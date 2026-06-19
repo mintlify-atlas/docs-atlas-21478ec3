@@ -1,5 +1,5 @@
 ---
-title: "Django Signals Emitted by django-meta-whatsapp"
+title: "Django Signals Reference for django-meta-whatsapp Events"
 sidebarTitle: "Signals"
 description: "Hook into WhatsApp events using four Django signals: message received, message sent, campaign completed, and user subscribed via signup link."
 ---
@@ -31,7 +31,7 @@ def handle_inbound_message(sender, message: WhatsAppMessage, **kwargs):
 
 ### `whatsapp_message_sent`
 
-Fired when an outbound message is dispatched to the Meta Cloud API.
+Defined in `django_meta_whatsapp.signals` for use by host-application code. Connect a receiver to this signal and dispatch it yourself whenever your application sends an outbound message to track or log sent messages.
 
 **Provided kwargs:** `message` — a `WhatsAppMessage` instance with `direction="outbound"`.
 
@@ -48,11 +48,15 @@ def log_sent_message(sender, message, **kwargs):
     })
 ```
 
+<Note>
+  `whatsapp_message_sent` is provided as a hook for your own application code to dispatch — the library itself does not fire it automatically. Call `whatsapp_message_sent.send(sender=..., message=msg_instance)` from your own views or utilities after a successful send.
+</Note>
+
 ---
 
 ### `whatsapp_campaign_completed`
 
-Fired when a campaign finishes executing — all recipients have been attempted (sent or failed). Use this to send summary notifications or update external systems.
+Defined in `django_meta_whatsapp.signals` for use by host-application code. Dispatch this signal from your own campaign post-processing logic to notify other parts of your application when a campaign finishes.
 
 **Provided kwargs:**
 - `campaign` — a `WhatsAppCampaign` instance
@@ -69,6 +73,10 @@ def notify_on_campaign_done(sender, campaign, sent, failed, **kwargs):
         f"Campaign '{campaign.name}' done: {sent} sent, {failed} failed."
     )
 ```
+
+<Note>
+  `whatsapp_campaign_completed` is provided as a hook for your own application code to dispatch — the library itself does not fire it automatically after `run_campaign()` completes. Dispatch it manually in a post-campaign hook if you need cross-component notifications.
+</Note>
 
 ---
 
@@ -121,12 +129,12 @@ INSTALLED_APPS = [
 
 ## Signal Reference
 
-| Signal | Sender | Key kwargs |
-|--------|--------|-----------|
-| `whatsapp_message_received` | `WebhookView` | `message: WhatsAppMessage` |
-| `whatsapp_message_sent` | varies | `message: WhatsAppMessage` |
-| `whatsapp_campaign_completed` | varies | `campaign: WhatsAppCampaign`, `sent: int`, `failed: int` |
-| `whatsapp_user_subscribed` | `WebhookView` | `contact: WhatsAppContact`, `signup: WhatsAppSignup` |
+| Signal | Dispatched by | Key kwargs |
+|--------|---------------|-----------| 
+| `whatsapp_message_received` | `WebhookView` (automatically) | `message: WhatsAppMessage` |
+| `whatsapp_message_sent` | your application code | `message: WhatsAppMessage` |
+| `whatsapp_campaign_completed` | your application code | `campaign: WhatsAppCampaign`, `sent: int`, `failed: int` |
+| `whatsapp_user_subscribed` | `WebhookView` (automatically) | `contact: WhatsAppContact`, `signup: WhatsAppSignup` |
 
 Import path for all signals:
 

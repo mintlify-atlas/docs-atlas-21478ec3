@@ -1,10 +1,10 @@
 ---
-title: "Signals Reference — django-meta-whatsapp Events"
+title: "Django Signals Reference — django-meta-whatsapp Events"
 sidebarTitle: "Signals"
-description: "Reference for the four Django signals emitted by django-meta-whatsapp: whatsapp_message_received, whatsapp_message_sent, whatsapp_campaign_completed, whatsapp_user_subscribed."
+description: "Reference for the four Django signals in django-meta-whatsapp: which ones fire automatically and which are available for you to dispatch."
 ---
 
-django-meta-whatsapp emits four Django signals. Connect to them in your app's `AppConfig.ready()` to hook into WhatsApp events. All signals are importable from `django_meta_whatsapp.signals`.
+django-meta-whatsapp defines four Django signals. Two are dispatched automatically by the built-in `WebhookView`; two are defined in the library but not dispatched by any built-in code — they are provided as hooks for you to fire from your own views or tasks. Connect to any of them in your app's `AppConfig.ready()`. All signals are importable from `django_meta_whatsapp.signals`.
 
 ## Import
 
@@ -21,7 +21,7 @@ from django_meta_whatsapp.signals import (
 
 ## `whatsapp_message_received`
 
-**Fired by:** `WebhookView` when an inbound message is ingested and saved.
+**Fired by:** `WebhookView._process()` when an inbound message is ingested and saved.
 
 **kwargs:**
 
@@ -46,22 +46,36 @@ def on_message_received(sender, message, **kwargs):
 
 ## `whatsapp_message_sent`
 
-**Fired by:** `WebhookView` when an outbound message status update (`sent`) arrives via webhook.
+**Fired by:** Not dispatched by any built-in library code. This signal is defined and exported so that your project can fire it from a custom outbound send view or Celery task after successfully calling `send_text_message()`, `send_template_message()`, or any other send util.
 
 **kwargs:**
 
 | Name | Type | Description |
 |---|---|---|
-| `message` | `WhatsAppMessage` | The outbound message instance whose status has just been updated to `"sent"`. |
+| `message` | `WhatsAppMessage` | The outbound message instance that was just sent. |
 
 ```python
+# Example: fire the signal yourself after saving an outbound message
+from django_meta_whatsapp.signals import whatsapp_message_sent
+from django_meta_whatsapp.models import WhatsAppMessage
+
+msg = WhatsAppMessage.objects.create(
+    phone_number="919876543210",
+    direction="outbound",
+    message_type="text",
+    message_body="Hello!",
+    message_id=resp["messages"][0]["id"],
+)
+whatsapp_message_sent.send(sender=None, message=msg)
+```
+
+```python
+# Example: receive the signal in a handler
 from django.dispatch import receiver
 from django_meta_whatsapp.signals import whatsapp_message_sent
 
 @receiver(whatsapp_message_sent)
 def on_message_sent(sender, message, **kwargs):
-    # message.direction == "outbound"
-    # message.status    == "sent"
     print(f"Message {message.message_id} sent to {message.phone_number}")
 ```
 
@@ -69,25 +83,37 @@ def on_message_sent(sender, message, **kwargs):
 
 ## `whatsapp_campaign_completed`
 
-**Fired by:** `run_campaign()` once all sends have been attempted for a campaign.
+**Fired by:** Not dispatched by any built-in library code. `run_campaign()` and `run_campaign_async()` in `utils.py` do not emit this signal. Define a receiver and fire it yourself at the end of a custom campaign runner or Celery task if you need post-campaign hooks.
 
 **kwargs:**
 
 | Name | Type | Description |
 |---|---|---|
-| `campaign` | `WhatsAppCampaign` | The completed campaign instance. `campaign.status` is `"completed"` at this point. |
+| `campaign` | `WhatsAppCampaign` | The completed campaign instance. |
 | `sent` | `int` | Number of messages successfully sent. |
 | `failed` | `int` | Number of messages that failed to send. |
 
 ```python
+# Example: fire the signal yourself after run_campaign() returns
+from django_meta_whatsapp.signals import whatsapp_campaign_completed
+from django_meta_whatsapp.utils import run_campaign
+
+result = run_campaign(campaign.id, account=account)
+whatsapp_campaign_completed.send(
+    sender=None,
+    campaign=campaign,
+    sent=result["sent"],
+    failed=result["failed"],
+)
+```
+
+```python
+# Example: receive the signal in a handler
 from django.dispatch import receiver
 from django_meta_whatsapp.signals import whatsapp_campaign_completed
 
 @receiver(whatsapp_campaign_completed)
 def on_campaign_done(sender, campaign, sent, failed, **kwargs):
-    # campaign.name          — campaign name
-    # campaign.status        — "completed"
-    # sent + failed == campaign.total_count
     print(
         f"Campaign '{campaign.name}' finished: "
         f"{sent} sent, {failed} failed out of {campaign.total_count} total."
@@ -98,7 +124,7 @@ def on_campaign_done(sender, campaign, sent, failed, **kwargs):
 
 ## `whatsapp_user_subscribed`
 
-**Fired by:** `WebhookView` when a user subscribes through an In-App Signup link.
+**Fired by:** `WebhookView._process()` when a user subscribes through an In-App Signup link (`in_app_signup` webhook event).
 
 **kwargs:**
 

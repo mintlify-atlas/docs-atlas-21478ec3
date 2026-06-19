@@ -1,7 +1,7 @@
 ---
 title: "WhatsApp Webhook Engine — Inbound Message Processing"
 sidebarTitle: "Webhooks"
-description: "Configure your Meta App webhook to point at django-meta-whatsapp's built-in endpoint, which auto-processes inbound messages, delivery receipts, and status updates."
+description: "Configure your Meta App webhook with django-meta-whatsapp's built-in endpoint to auto-process inbound messages, delivery receipts, and signup events."
 ---
 
 django-meta-whatsapp includes a built-in webhook endpoint that receives and processes all events from Meta — inbound messages, message delivery receipts, read receipts, and In-App Signup subscriptions — automatically updating your database and firing Django signals.
@@ -16,7 +16,7 @@ path("whatsapp/", include("django_meta_whatsapp.urls", namespace="django_meta_wh
 
 Your webhook URL will be:
 
-```
+```text
 https://yourdomain.com/whatsapp/webhook/
 ```
 
@@ -89,6 +89,8 @@ When a message's delivery status changes (sent → delivered → read, or failed
 - Updates `WhatsAppMessage.status` by matching on `message_id`
 - Updates `WhatsAppCampaignRecipient.status` if the message was part of a campaign
 
+No signal is fired for status updates — poll `WhatsAppMessage.status` directly if you need to react to delivery events.
+
 ### In-App Signup Subscriptions
 
 When a user subscribes through a `wa.me` deep link:
@@ -109,11 +111,11 @@ Each log record contains:
 |-------|-------------|
 | `received_at` | `DateTimeField` — timestamp when the payload arrived |
 | `payload` | `JSONField` — the complete raw payload from Meta |
-| `processed` | `BooleanField` — whether the payload was processed without error |
-| `error` | `TextField` — error message if processing failed |
+| `processed` | `BooleanField` — present on the model; defaults to `False` |
+| `error` | `TextField` — present on the model; blank by default |
 
 <Note>
-  Webhook logs are written **before** processing, so even if your signal receivers raise an exception, the raw payload is preserved for replay or debugging.
+  Webhook logs are written **before** processing, so even if your signal receivers raise an exception, the raw payload is preserved for replay or debugging. The `processed` and `error` fields are available on the model for you to set in custom post-processing hooks — the built-in webhook view does not update them after creation.
 </Note>
 
 ## Multi-Account Webhook
