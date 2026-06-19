@@ -1,0 +1,140 @@
+---
+title: "Django Signals Emitted by django-meta-whatsapp"
+sidebarTitle: "Signals"
+description: "Hook into WhatsApp events using four Django signals: message received, message sent, campaign completed, and user subscribed via signup link."
+---
+
+django-meta-whatsapp emits four Django signals you can connect to in your host application to react to WhatsApp events — inbound messages, sent messages, campaign completions, and In-App Signup subscriptions.
+
+All four signals are defined in `django_meta_whatsapp.signals` and follow standard Django signal conventions.
+
+## Available Signals
+
+### `whatsapp_message_received`
+
+Fired when an inbound message arrives and is processed by the webhook engine. The signal is sent after the message is persisted to the database.
+
+**Provided kwargs:** `message` — a `WhatsAppMessage` instance with `direction="inbound"`.
+
+```python myapp/handlers.py
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_message_received
+from django_meta_whatsapp.models import WhatsAppMessage
+
+@receiver(whatsapp_message_received)
+def handle_inbound_message(sender, message: WhatsAppMessage, **kwargs):
+    print(f"New message from {message.phone_number}: {message.message_body}")
+    # Trigger a CRM workflow, auto-reply, etc.
+```
+
+---
+
+### `whatsapp_message_sent`
+
+Fired when an outbound message is dispatched to the Meta Cloud API.
+
+**Provided kwargs:** `message` — a `WhatsAppMessage` instance with `direction="outbound"`.
+
+```python myapp/handlers.py
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_message_sent
+
+@receiver(whatsapp_message_sent)
+def log_sent_message(sender, message, **kwargs):
+    # Log to your analytics system
+    analytics.track("whatsapp_message_sent", {
+        "phone": message.phone_number,
+        "type": message.message_type,
+    })
+```
+
+---
+
+### `whatsapp_campaign_completed`
+
+Fired when a campaign finishes executing — all recipients have been attempted (sent or failed). Use this to send summary notifications or update external systems.
+
+**Provided kwargs:**
+- `campaign` — a `WhatsAppCampaign` instance
+- `sent` — integer count of successfully sent messages
+- `failed` — integer count of failed sends
+
+```python myapp/handlers.py
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_campaign_completed
+
+@receiver(whatsapp_campaign_completed)
+def notify_on_campaign_done(sender, campaign, sent, failed, **kwargs):
+    send_slack_notification(
+        f"Campaign '{campaign.name}' done: {sent} sent, {failed} failed."
+    )
+```
+
+---
+
+### `whatsapp_user_subscribed`
+
+Fired when a user subscribes via an In-App Signup deep link (`wa.me/PHONE/signup/ID`). The webhook engine creates or updates the `WhatsAppContact` record before firing this signal.
+
+**Provided kwargs:**
+- `contact` — a `WhatsAppContact` instance (newly created or updated)
+- `signup` — the `WhatsAppSignup` instance the user subscribed through
+
+```python myapp/handlers.py
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_user_subscribed
+
+@receiver(whatsapp_user_subscribed)
+def on_user_subscribed(sender, contact, signup, **kwargs):
+    # Send welcome email, create CRM record, etc.
+    welcome_email.send(to=contact.email, name=contact.display_name)
+```
+
+---
+
+## Connecting Signals
+
+Decorate receivers with `@receiver` and ensure the module containing them is imported at Django startup. The canonical place to do this is in your app's `AppConfig.ready()` method:
+
+```python myapp/apps.py
+from django.apps import AppConfig
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        import myapp.handlers  # noqa — registers all @receiver decorators
+```
+
+Make sure your `AppConfig` is referenced in `INSTALLED_APPS` (either as the dotted path or via `default_app_config`):
+
+```python settings.py
+INSTALLED_APPS = [
+    # ...
+    "myapp.apps.MyAppConfig",  # explicit reference ensures ready() is called
+]
+```
+
+<Note>
+  Signal receivers run **synchronously** in the same request/response cycle as the webhook handler. The webhook view must return a response to Meta within a few seconds or Meta will retry the delivery. Keep your receivers fast — offload any heavy work (database writes, HTTP calls, email sends) to Celery tasks queued from inside the receiver.
+</Note>
+
+## Signal Reference
+
+| Signal | Sender | Key kwargs |
+|--------|--------|-----------|
+| `whatsapp_message_received` | `WebhookView` | `message: WhatsAppMessage` |
+| `whatsapp_message_sent` | varies | `message: WhatsAppMessage` |
+| `whatsapp_campaign_completed` | varies | `campaign: WhatsAppCampaign`, `sent: int`, `failed: int` |
+| `whatsapp_user_subscribed` | `WebhookView` | `contact: WhatsAppContact`, `signup: WhatsAppSignup` |
+
+Import path for all signals:
+
+```python
+from django_meta_whatsapp.signals import (
+    whatsapp_message_received,
+    whatsapp_message_sent,
+    whatsapp_campaign_completed,
+    whatsapp_user_subscribed,
+)
+```

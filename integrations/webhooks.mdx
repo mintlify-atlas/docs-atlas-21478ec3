@@ -1,0 +1,179 @@
+---
+title: "WhatsApp Webhook Engine — Inbound Message Processing"
+sidebarTitle: "Webhooks"
+description: "Configure your Meta App webhook to point at django-meta-whatsapp's built-in endpoint, which auto-processes inbound messages, delivery receipts, and status updates."
+---
+
+django-meta-whatsapp includes a built-in webhook endpoint that receives and processes all events from Meta — inbound messages, message delivery receipts, read receipts, and In-App Signup subscriptions — automatically updating your database and firing Django signals.
+
+## Webhook URL
+
+The webhook endpoint is mounted wherever you include `django_meta_whatsapp.urls`. With the standard mount path:
+
+```python urls.py
+path("whatsapp/", include("django_meta_whatsapp.urls", namespace="django_meta_whatsapp")),
+```
+
+Your webhook URL will be:
+
+```
+https://yourdomain.com/whatsapp/webhook/
+```
+
+## Configuring in Meta
+
+<Steps>
+  <Step title="Open your Meta App dashboard">
+    Go to [Meta for Developers](https://developers.facebook.com) → select your App → **WhatsApp** → **Configuration** in the left sidebar.
+  </Step>
+
+  <Step title="Set the Callback URL">
+    Enter your full webhook URL: `https://yourdomain.com/whatsapp/webhook/`
+
+    Meta requires a valid HTTPS endpoint. Use a tool like [ngrok](https://ngrok.com) for local development.
+  </Step>
+
+  <Step title="Set the Verify Token">
+    Enter the same token you configured in your `WHATSAPP` settings (or the `verify_token` field on your `WhatsAppAccount` record):
+
+    ```python settings.py
+    WHATSAPP = {
+        # ...
+        "VERIFY_TOKEN": "your_secure_random_string",
+    }
+    ```
+  </Step>
+
+  <Step title="Subscribe to webhook fields">
+    Under **Webhook fields**, enable the `messages` field. This is required to receive inbound messages, status updates, and In-App Signup events.
+
+    Click **Save** — Meta will immediately send a verification GET request to confirm your endpoint is live.
+  </Step>
+</Steps>
+
+## How Verification Works
+
+Meta verifies your webhook by sending a `GET` request with three query parameters:
+
+| Parameter | Value |
+|-----------|-------|
+| `hub.mode` | `"subscribe"` |
+| `hub.verify_token` | The token you configured |
+| `hub.challenge` | A random string Meta wants echoed back |
+
+The webhook view matches `hub.verify_token` against all active `WhatsAppAccount` records first (checking the `verify_token` field), then falls back to `WHATSAPP["VERIFY_TOKEN"]` in settings. On a match, it responds with the bare `hub.challenge` string. On mismatch, it returns `403 Forbidden`.
+
+This means you can use **per-account verify tokens** for multi-account setups, or a single global fallback token — both are handled automatically.
+
+## What Gets Processed Automatically
+
+Every POST payload from Meta is stored in `WhatsAppWebhookLog` before processing begins, so nothing is ever lost. The `_process()` handler then routes each event:
+
+### Inbound Messages
+
+When a user sends your business a WhatsApp message:
+
+- Creates a `WhatsAppMessage` record with `direction="inbound"`
+- Creates a `WhatsAppContact` record for the sender if one does not exist (`get_or_create` on `phone`)
+- Creates or retrieves the `WhatsAppConversation` for that phone number
+- Increments `WhatsAppConversation.unread_count` by 1 and updates `last_message_at`
+- Stores the full raw webhook payload in `WhatsAppMessage.raw_payload` for debugging
+- Fires the `whatsapp_message_received` signal
+
+Supported inbound message types: `text`, `image`, `video`, `audio`, `document`, `location`, `reaction`, `interactive`, `button`, `sticker`, `voice`.
+
+### Message Status Updates
+
+When a message's delivery status changes (sent → delivered → read, or failed):
+
+- Updates `WhatsAppMessage.status` by matching on `message_id`
+- Updates `WhatsAppCampaignRecipient.status` if the message was part of a campaign
+
+### In-App Signup Subscriptions
+
+When a user subscribes through a `wa.me` deep link:
+
+- Creates or updates the `WhatsAppContact` record for the subscriber's phone number (`wa_id`)
+- Sets `contact.subscribed_via_signup` and `contact.subscribed_at`
+- Increments `WhatsAppSignup.subscriber_count`
+- Adds the contact to `signup.auto_add_to_label` if one is configured
+- Fires the `whatsapp_user_subscribed` signal
+
+## Webhook Logs
+
+Every webhook payload received is stored in `WhatsAppWebhookLog` before processing. You can view all logs in the admin UI at `/whatsapp/settings/webhook-logs/`.
+
+Each log record contains:
+
+| Field | Description |
+|-------|-------------|
+| `received_at` | `DateTimeField` — timestamp when the payload arrived |
+| `payload` | `JSONField` — the complete raw payload from Meta |
+| `processed` | `BooleanField` — whether the payload was processed without error |
+| `error` | `TextField` — error message if processing failed |
+
+<Note>
+  Webhook logs are written **before** processing, so even if your signal receivers raise an exception, the raw payload is preserved for replay or debugging.
+</Note>
+
+## Multi-Account Webhook
+
+A single webhook URL serves all WhatsApp Business Accounts. The webhook payload from Meta includes a `phone_number_id` inside `value.metadata`. The webhook engine looks this up against all `WhatsAppAccount` records to route the event to the correct account:
+
+```python
+phone_number_id = value.get("metadata", {}).get("phone_number_id", "")
+account = WhatsAppAccount.objects.filter(phone_number_id=phone_number_id).first()
+```
+
+This means you only ever need to configure one callback URL in Meta, regardless of how many accounts you manage.
+
+## Security
+
+- The webhook endpoint is **CSRF-exempt** — this is required by Meta, which cannot include a Django CSRF token in its outbound POST requests.
+- All other views in django-meta-whatsapp require authentication via `LoginRequiredMixin`.
+- The verify token check on `GET` requests acts as the authentication mechanism for Meta's subscription verification.
+
+<Warning>
+  The webhook endpoint is intentionally public and CSRF-exempt by design — Meta's servers must be able to reach it without session cookies. Make sure your `VERIFY_TOKEN` (or per-account `verify_token`) is **cryptographically random** and not guessable. A UUID4 value (which is the default for new `WhatsAppAccount` records) is sufficient.
+</Warning>
+
+**Additional hardening recommendations:**
+
+- Always use **HTTPS** in production. Meta requires a valid SSL certificate on your callback URL — self-signed certificates are rejected.
+- Rotate your verify tokens periodically and update both your settings and the Meta App dashboard together.
+- Monitor `WhatsAppWebhookLog` for unexpected payloads or high error rates.
+
+## Reacting to Inbound Messages
+
+Connect to the `whatsapp_message_received` signal to add custom logic for every message that arrives. Here's a complete auto-reply example:
+
+```python myapp/handlers.py
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_message_received
+from django_meta_whatsapp.utils import send_text_message
+
+@receiver(whatsapp_message_received)
+def auto_reply(sender, message, **kwargs):
+    if message.message_body.lower() == "hello":
+        send_text_message(
+            message.phone_number,
+            "Hi! Thanks for reaching out. We'll get back to you soon.",
+            account=message.account
+        )
+```
+
+Register this handler in your `AppConfig.ready()`:
+
+```python myapp/apps.py
+from django.apps import AppConfig
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        import myapp.handlers  # noqa
+```
+
+<Note>
+  Signal receivers execute synchronously inside the webhook request. Keep them fast — offload slow operations to Celery tasks to avoid delaying Meta's response and triggering retries.
+</Note>

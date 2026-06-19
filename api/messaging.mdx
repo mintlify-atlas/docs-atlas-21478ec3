@@ -1,0 +1,244 @@
+---
+title: "Messaging REST API — Send Text, Location, and Templates"
+sidebarTitle: "Messaging"
+description: "HTTP endpoints to send WhatsApp text messages, location pins, and approved template messages. All endpoints require X-API-Key authentication."
+---
+
+The messaging API provides three endpoints for sending WhatsApp messages programmatically, plus one endpoint for reading recent conversations. All endpoints use `POST` (or `GET` for reads) and require the `X-API-Key` header. See [Authentication](/api/authentication) for setup instructions.
+
+---
+
+## POST /whatsapp/api/send-message/
+
+Send a plain text WhatsApp message to any phone number.
+
+### Request Body
+
+```json
+{
+  "phone": "919876543210",
+  "message": "Hello from the API!",
+  "account_id": 1
+}
+```
+
+<ParamField body="phone" type="string" required>
+  Recipient phone number including country code, **without** a leading `+` prefix. Example: `"919876543210"` for an Indian number.
+</ParamField>
+
+<ParamField body="message" type="string" required>
+  The text message body to send. Supports plain text up to WhatsApp's standard character limit.
+</ParamField>
+
+<ParamField body="account_id" type="integer">
+  Primary key of the `WhatsAppAccount` to send from. When omitted, the first active account is used automatically.
+</ParamField>
+
+### Example
+
+```bash
+curl -X POST https://yourdomain.com/whatsapp/api/send-message/ \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "919876543210", "message": "Hello!"}'
+```
+
+### Success Response
+
+```json
+{
+  "status": "sent",
+  "result": {
+    "messaging_product": "whatsapp",
+    "contacts": [{"input": "919876543210", "wa_id": "919876543210"}],
+    "messages": [{"id": "wamid.ABC123"}]
+  }
+}
+```
+
+---
+
+## POST /whatsapp/api/send-location/
+
+Send a location pin message. The recipient will see an interactive map card in their chat.
+
+### Request Body
+
+```json
+{
+  "phone": "919876543210",
+  "latitude": 28.6139,
+  "longitude": 77.2090,
+  "name": "Our Office",
+  "address": "Connaught Place, New Delhi"
+}
+```
+
+<ParamField body="phone" type="string" required>
+  Recipient phone number with country code, no `+` prefix.
+</ParamField>
+
+<ParamField body="latitude" type="number" required>
+  Latitude in decimal degrees. Example: `28.6139` for New Delhi.
+</ParamField>
+
+<ParamField body="longitude" type="number" required>
+  Longitude in decimal degrees. Example: `77.2090` for New Delhi.
+</ParamField>
+
+<ParamField body="name" type="string">
+  Location name displayed as the card title in chat. Example: `"Our Office"`.
+</ParamField>
+
+<ParamField body="address" type="string">
+  Address text displayed below the map pin. Example: `"Connaught Place, New Delhi"`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X POST https://yourdomain.com/whatsapp/api/send-location/ \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone": "919876543210",
+    "latitude": 28.6139,
+    "longitude": 77.2090,
+    "name": "Our Office"
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "status": "sent",
+  "result": {
+    "messaging_product": "whatsapp",
+    "contacts": [{"input": "919876543210", "wa_id": "919876543210"}],
+    "messages": [{"id": "wamid.DEF456"}]
+  }
+}
+```
+
+---
+
+## POST /whatsapp/api/send-template/
+
+Send an approved WhatsApp template message with optional variable substitution. Templates must be submitted through the dashboard and approved by Meta before use.
+
+### Request Body
+
+```json
+{
+  "phone": "919876543210",
+  "template_name": "order_update",
+  "language": "en",
+  "body_params": ["Rahul", "ORD-999"],
+  "header_params": ["Order Shipped"]
+}
+```
+
+<ParamField body="phone" type="string" required>
+  Recipient phone number with country code, no `+` prefix.
+</ParamField>
+
+<ParamField body="template_name" type="string" required>
+  Exact name of the approved template as registered on Meta. Must match the name shown in **Templates** in your dashboard.
+</ParamField>
+
+<ParamField body="language" type="string" default="en">
+  BCP-47 language code for the template. Examples: `"en"`, `"hi"`, `"en_US"`. Defaults to `"en"` when omitted.
+</ParamField>
+
+<ParamField body="body_params" type="string[]">
+  Ordered list of values to substitute into the template body's `{{1}}`, `{{2}}`, etc. placeholders. The first element fills `{{1}}`, the second fills `{{2}}`, and so on.
+</ParamField>
+
+<ParamField body="header_params" type="string[]">
+  Ordered list of values for variables in the template header component, using the same positional convention as `body_params`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X POST https://yourdomain.com/whatsapp/api/send-template/ \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone": "919876543210",
+    "template_name": "order_update",
+    "language": "en",
+    "body_params": ["Rahul", "ORD-999"]
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "status": "sent",
+  "result": {
+    "messaging_product": "whatsapp",
+    "contacts": [{"input": "919876543210", "wa_id": "919876543210"}],
+    "messages": [{"id": "wamid.GHI789"}]
+  }
+}
+```
+
+---
+
+## GET /whatsapp/api/chats/
+
+Retrieve the 50 most recent conversations, ordered by the time of the last message.
+
+### Example
+
+```bash
+curl https://yourdomain.com/whatsapp/api/chats/ \
+  -H "X-API-Key: your-key"
+```
+
+### Success Response
+
+```json
+{
+  "conversations": [
+    {
+      "id": 1,
+      "phone_number": "919876543210",
+      "label": null,
+      "unread_count": 2,
+      "last_message_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+### Response Fields
+
+<ResponseField name="conversations" type="array">
+  List of the 50 most recent conversation objects, sorted descending by `last_message_at`.
+
+  <Expandable title="Conversation object fields">
+    <ResponseField name="id" type="integer">
+      Primary key of the `WhatsAppConversation` record.
+    </ResponseField>
+
+    <ResponseField name="phone_number" type="string">
+      The contact's phone number as stored (may include or omit the `+` prefix depending on how it was recorded).
+    </ResponseField>
+
+    <ResponseField name="label" type="integer | null">
+      Primary key of the assigned `WhatsAppLabel`, or `null` if no label has been applied.
+    </ResponseField>
+
+    <ResponseField name="unread_count" type="integer">
+      Number of inbound messages that have not yet been read in the dashboard inbox.
+    </ResponseField>
+
+    <ResponseField name="last_message_at" type="datetime | null">
+      ISO 8601 timestamp of the most recent message in the conversation. `null` for brand-new conversations with no messages yet.
+    </ResponseField>
+  </Expandable>
+</ResponseField>

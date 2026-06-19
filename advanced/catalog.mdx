@@ -1,0 +1,147 @@
+---
+title: "Meta Commerce Catalog — Product Messages on WhatsApp"
+sidebarTitle: "Catalog"
+description: "Sync your Meta Commerce catalog to Django, then send interactive single-product, multi-product, and carousel product messages to WhatsApp contacts."
+---
+
+django-meta-whatsapp integrates with Meta Commerce catalogs, letting you sync your product inventory locally and send interactive product messages — single product cards, product lists, full catalog messages, and scrollable carousels.
+
+## WhatsAppCatalogProduct Model Fields
+
+Each synced product is stored as a `WhatsAppCatalogProduct` record:
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey` | The `WhatsAppAccount` this product belongs to |
+| `catalog_id` | `CharField` | The Meta Commerce Catalog ID |
+| `retailer_id` | `CharField` | Your internal product ID (Meta's `retailer_id`) |
+| `name` | `CharField` | Product display name |
+| `price` | `CharField` | Price string including currency (e.g. `"1500 INR"`) |
+| `image_url` | `URLField` | Product image URL pulled from Meta |
+| `is_active` | `BooleanField` | Whether the product is active in the local mirror |
+| `synced_at` | `DateTimeField` | Timestamp of the last successful sync (`auto_now=True`) |
+
+Products are uniquely identified by the combination of `(account, catalog_id, retailer_id)`.
+
+## Syncing the Catalog
+
+Before you can send product messages, sync your catalog from Meta to populate the local `WhatsAppCatalogProduct` table.
+
+**Step 1:** Set the `default_catalog_id` on your `WhatsAppAccount` record in the dashboard at `/whatsapp/settings/accounts/`.
+
+**Step 2:** Trigger a sync from the UI at `/whatsapp/catalog/sync/`, or do it programmatically:
+
+```python
+from django_meta_whatsapp.utils import sync_catalog_products
+from django_meta_whatsapp.models import WhatsAppAccount
+
+account = WhatsAppAccount.objects.get(pk=1)
+result = sync_catalog_products(catalog_id="123456789", account=account)
+print(f"Synced {result['synced']} products")
+```
+
+The sync function paginates through all products in the catalog (100 per page) and uses `update_or_create` to upsert each product locally. Re-running it is safe and idempotent.
+
+## Sending Product Messages
+
+django-meta-whatsapp provides four dedicated functions for sending interactive product messages via the Meta Cloud API.
+
+### Single Product
+
+Send a single product card with a body text and optional footer. The recipient sees the product image, name, and price with an **Add to Cart** button.
+
+```python
+from django_meta_whatsapp.utils import send_single_product_message
+
+send_single_product_message(
+    phone_number="919876543210",
+    catalog_id="123456789",
+    retailer_id="SKU-001",
+    body="Check out this item!",
+    footer="Limited stock",
+    account=account
+)
+```
+
+### Product List (Multi-Section)
+
+Send a scrollable product list organised into named sections. Each section can contain multiple products identified by their `product_retailer_id`.
+
+```python
+from django_meta_whatsapp.utils import send_multi_product_message
+
+sections = [
+    {
+        "title": "Best Sellers",
+        "product_items": [
+            {"product_retailer_id": "SKU-001"},
+            {"product_retailer_id": "SKU-002"},
+        ]
+    }
+]
+send_multi_product_message(
+    phone_number="919876543210",
+    catalog_id="123456789",
+    sections=sections,
+    header="Our Products",
+    body="Browse our top picks",
+    footer="Free shipping over ₹500",
+    account=account
+)
+```
+
+### Full Catalog
+
+Send a catalog message that lets the recipient browse your entire catalog. A single product is shown as the thumbnail that the recipient taps to open the full catalog.
+
+```python
+from django_meta_whatsapp.utils import send_catalog_message
+
+send_catalog_message(
+    phone_number="919876543210",
+    thumbnail_retailer_id="SKU-001",  # product shown as catalog thumbnail
+    body="Browse our full collection",
+    footer="Tap to explore",
+    account=account
+)
+```
+
+### Product Carousel
+
+Send a horizontally scrollable carousel of individual product cards. Pass a list of `retailer_id` values and the recipient can swipe through each product.
+
+```python
+from django_meta_whatsapp.utils import send_product_carousel_message
+
+send_product_carousel_message(
+    phone_number="919876543210",
+    catalog_id="123456789",
+    retailer_ids=["SKU-001", "SKU-002", "SKU-003"],
+    body="Swipe through our featured products",
+    account=account
+)
+```
+
+## Catalog Link Message
+
+Send a plain text message containing a direct link to your WhatsApp catalog storefront. The link opens the catalog inside WhatsApp on the recipient's device.
+
+```python
+from django_meta_whatsapp.utils import send_catalog_link_message
+
+send_catalog_link_message(
+    phone_number="919876543210",
+    wa_number="919876543210",  # your WhatsApp Business phone number (no +)
+    account=account
+)
+# Sends: "Browse our full catalog here: https://wa.me/c/919876543210"
+```
+
+## Managing Products in the UI
+
+The catalog product list is available at `/whatsapp/catalog/`. From there you can:
+
+- **Add** a product manually with its `catalog_id`, `retailer_id`, name, price, and image URL
+- **Edit** an existing product's details
+- **Delete** a product from the local mirror
+- **Sync** all products from Meta at `/whatsapp/catalog/sync/` — this pulls the latest product data and upserts it into the local database

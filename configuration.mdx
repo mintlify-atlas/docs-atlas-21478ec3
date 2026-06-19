@@ -1,0 +1,263 @@
+---
+title: "Configure django-meta-whatsapp Settings"
+sidebarTitle: "Configuration"
+description: "Complete reference for the WHATSAPP settings dict — credentials, UI customization, audience providers, contact filters, and Celery integration."
+---
+
+All configuration for `django-meta-whatsapp` lives in a single `WHATSAPP` dictionary in your Django `settings.py`. There is one additional top-level setting (`WHATSAPP_USE_CELERY`) that sits outside the dict. The snippet below shows every supported option with inline comments — detailed explanations for each follow.
+
+<Warning>
+  **Never commit real API tokens to version control.** Use environment variables or a secrets manager to inject sensitive values at runtime:
+
+  ```python settings.py
+  import os
+
+  WHATSAPP = {
+      "ACCESS_TOKEN": os.environ["META_WA_ACCESS_TOKEN"],
+      "PHONE_NUMBER_ID": os.environ["META_WA_PHONE_NUMBER_ID"],
+      "WEBHOOK_VERIFY_TOKEN": os.environ["META_WA_VERIFY_TOKEN"],
+  }
+  ```
+</Warning>
+
+---
+
+## Complete settings reference
+
+```python settings.py
+WHATSAPP = {
+    # ── Required ─────────────────────────────────────────────────
+    "ACCESS_TOKEN": "EAA...",              # Meta permanent / system-user access token
+    "PHONE_NUMBER_ID": "1234567890",       # From the Meta developer dashboard
+
+    # The verification token Meta sends on webhook setup — any random string you choose
+    "WEBHOOK_VERIFY_TOKEN": "your_secure_random_string",
+
+    # ── Optional: WABA ID (needed for template sync) ─────────────
+    "WABA_ID": "9876543210",               # WhatsApp Business Account ID
+
+    # ── UI Customization ─────────────────────────────────────────
+    "DASHBOARD_NAME": "My Business CRM",
+    "DASHBOARD_LOGO": "https://yourwebsite.com/logo.png",
+    "LOGIN_URL": "/accounts/login/",       # Redirect for unauthenticated users
+
+    # ── Audience Providers (optional) ────────────────────────────
+    "PHONE_FIELD": "phone",                # Field name on your model with the phone number
+    "NAME_FIELD": "name",                  # Field name on your model with the display name
+    "AUDIENCES": {
+        "All Users":     "myapp.audiences.all_users",
+        "VIP Customers": "myapp.audiences.vip_customers",
+    },
+
+    # ── Contact Filter Presets (optional) ────────────────────────
+    "CONTACT_FILTERS": {
+        "VIP Customers":        '{"labels__name": "VIP"}',
+        "Subscribed via Link":  '{"subscribed_via_signup__isnull": false}',
+        "New This Month":       '{"created_at__gte": "2024-06-01"}',
+    },
+
+    # ── Custom Campaign Resolver (optional) ──────────────────────
+    "CAMPAIGN_RESOLVER": "myapp.campaigns.my_resolver",
+}
+
+# Celery integration (optional — top-level Django setting, NOT inside WHATSAPP)
+WHATSAPP_USE_CELERY = False
+```
+
+---
+
+## Settings parameters
+
+### Required
+
+<ParamField path="ACCESS_TOKEN" type="string" required>
+  The **permanent system-user access token** generated in Meta Business Suite. This is **not** a short-lived user token. Scopes required: `whatsapp_business_messaging`, `whatsapp_business_management`.
+</ParamField>
+
+<ParamField path="PHONE_NUMBER_ID" type="string" required>
+  The Phone Number ID associated with your WhatsApp Business number. Found in the **Meta developer dashboard** under your app's WhatsApp product section.
+</ParamField>
+
+<ParamField path="WEBHOOK_VERIFY_TOKEN" type="string" required>
+  Any secure random string of your choosing. Meta sends this value back when verifying the webhook endpoint URL — your endpoint checks it to confirm the request is genuine. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+</ParamField>
+
+---
+
+### Optional — WABA ID
+
+<ParamField path="WABA_ID" type="string">
+  Your **WhatsApp Business Account (WABA) ID**. Required for template sync (`sync_templates_from_meta`), creating In-App Signups, and pushing templates to Meta. Found in the Meta Business Suite under **Business Settings → WhatsApp Accounts**.
+</ParamField>
+
+---
+
+### Optional — UI Customisation
+
+<ParamField path="DASHBOARD_NAME" type="string" default="Meta WhatsApp">
+  The display name shown in the dashboard header and browser title bar. Customise it to match your brand, e.g. `"Acme Support Hub"`.
+</ParamField>
+
+<ParamField path="DASHBOARD_LOGO" type="string">
+  A fully-qualified URL to a logo image (PNG or SVG recommended) that appears in the dashboard navigation. If omitted, no logo is shown.
+</ParamField>
+
+<ParamField path="LOGIN_URL" type="string" default="/accounts/login/">
+  The URL to redirect unauthenticated users to when they try to access any dashboard view. Defaults to Django's standard login URL. Set to `"/admin/login/"` during development for convenience.
+</ParamField>
+
+---
+
+### Optional — Audience Providers
+
+<ParamField path="PHONE_FIELD" type="string" default="phone">
+  The attribute name on objects returned by your audience provider queryset that holds the phone number. The package reads `getattr(obj, PHONE_FIELD)` for each row.
+</ParamField>
+
+<ParamField path="NAME_FIELD" type="string" default="name">
+  The attribute name on objects returned by your audience provider queryset that holds the display name. Used when building campaign recipient lists.
+</ParamField>
+
+<ParamField path="AUDIENCES" type="dict">
+  A dictionary mapping human-readable audience names to **dotted Python import paths** of callables that return a queryset. Each name appears as an option in the campaign creation form's audience dropdown. See [Audience Providers](#audience-providers) below for examples.
+
+  ```python
+  "AUDIENCES": {
+      "All Users":     "myapp.audiences.all_users",
+      "VIP Customers": "myapp.audiences.vip_customers",
+  }
+  ```
+</ParamField>
+
+---
+
+### Optional — Contact Filter Presets
+
+<ParamField path="CONTACT_FILTERS" type="dict">
+  Named filter presets shown as a dropdown in the campaign creation form. Each value is a **JSON-encoded string** of Django ORM filter kwargs applied to the `WhatsAppContact` queryset. See [Contact Filter Presets](#contact-filter-presets) below.
+
+  ```python
+  "CONTACT_FILTERS": {
+      "VIP Customers": '{"labels__name": "VIP"}',
+  }
+  ```
+</ParamField>
+
+---
+
+### Optional — Custom Campaign Resolver
+
+<ParamField path="CAMPAIGN_RESOLVER" type="string">
+  Dotted path to a Python callable that takes a `WhatsAppCampaign` instance and returns a list of recipient dicts: `[{"phone": "...", "name": "...", "params": {...}}, ...]`. When set, this resolver takes full precedence over the built-in `AUDIENCES`, `CONTACT_FILTERS`, and CSV audience resolution logic.
+
+  ```python
+  "CAMPAIGN_RESOLVER": "myapp.campaigns.my_resolver"
+  ```
+</ParamField>
+
+---
+
+### Optional — Celery integration
+
+<ParamField path="WHATSAPP_USE_CELERY" type="bool" default="False">
+  **Top-level Django setting** (place it outside the `WHATSAPP` dict). When `True`, campaign execution is dispatched asynchronously via Celery using the `run_campaign_task` task. Requires the `celery` optional extra:
+
+  ```bash
+  pip install "django-meta-whatsapp[celery]"
+  # or: uv add "django-meta-whatsapp[celery]"
+  ```
+
+  ```python settings.py
+  WHATSAPP_USE_CELERY = True
+  ```
+
+  When `False` (default), campaigns run synchronously in the web process — fine for development or small lists.
+</ParamField>
+
+---
+
+## Audience Providers
+
+The `AUDIENCES` dict maps display names to Python callables that return Django querysets. At campaign send time the package imports and calls each function, then reads `PHONE_FIELD` and `NAME_FIELD` off each returned object to build the recipient list.
+
+```python myapp/audiences.py
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+def all_users():
+    """Return every active user with a phone number on file."""
+    return User.objects.filter(is_active=True, phone__isnull=False)
+
+
+def vip_customers():
+    """Return only top-tier customers."""
+    return User.objects.filter(is_active=True, tier="vip", phone__isnull=False)
+```
+
+Wire these into settings:
+
+```python settings.py
+WHATSAPP = {
+    # ...
+    "PHONE_FIELD": "phone",   # attribute on User that holds the phone number
+    "NAME_FIELD": "first_name",
+    "AUDIENCES": {
+        "All Users":     "myapp.audiences.all_users",
+        "VIP Customers": "myapp.audiences.vip_customers",
+    },
+}
+```
+
+The audience names (`"All Users"`, `"VIP Customers"`) appear verbatim in the campaign form's **Audience** dropdown.
+
+---
+
+## Contact Filter Presets
+
+`CONTACT_FILTERS` provides named, one-click audience filters that are applied to the built-in `WhatsAppContact` model when a campaign uses the `"contacts"` audience type. Each value is a **JSON-encoded string** representing standard Django ORM filter kwargs.
+
+```python settings.py
+WHATSAPP = {
+    # ...
+    "CONTACT_FILTERS": {
+        # Filter contacts who have the "VIP" label assigned
+        "VIP Customers":        '{"labels__name": "VIP"}',
+
+        # Filter contacts who subscribed via an In-App Signup link
+        "Subscribed via Link":  '{"subscribed_via_signup__isnull": false}',
+
+        # Filter contacts created on or after a specific date
+        "New This Month":       '{"created_at__gte": "2024-06-01"}',
+    },
+}
+```
+
+These preset names appear as a **dropdown** in the campaign creation form. Selecting one automatically populates the audience filter field, making it easy for non-technical users to target the right segment without writing filter expressions manually.
+
+---
+
+## Multi-Account Configuration
+
+For projects that manage more than one WhatsApp Business number, credentials are stored in **`WhatsAppAccount`** model records rather than (or in addition to) the global `WHATSAPP` settings dict.
+
+Accounts are created and managed entirely through the dashboard UI at:
+
+```
+/whatsapp/settings/accounts/
+```
+
+Each account stores its own `ACCESS_TOKEN`, `PHONE_NUMBER_ID`, and `WABA_ID`. When sending messages or running campaigns, pass the account instance explicitly:
+
+```python
+from django_meta_whatsapp.models import WhatsAppAccount
+from django_meta_whatsapp.utils import send_text_message
+
+account = WhatsAppAccount.objects.get(name="Brand B")
+send_text_message("919876543210", "Hello from Brand B!", account=account)
+```
+
+The global `WHATSAPP` settings dict acts as a **fallback** when no account is passed. You can designate one account as the project-wide default from the dashboard via **Settings → Accounts → Set as Global**.
+
+For a full walkthrough of multi-account patterns, see [Multi-Account Support](/advanced/multi-account).

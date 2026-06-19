@@ -1,0 +1,104 @@
+---
+title: "Campaigns REST API — List and Monitor Bulk Campaigns"
+sidebarTitle: "Campaigns"
+description: "GET /whatsapp/api/campaigns/ — retrieve the 50 most recent WhatsApp campaigns with their status, sent count, and failure count."
+---
+
+The campaigns API provides a read endpoint for retrieving campaign status and metrics. Campaign creation and execution are handled through the dashboard UI or by calling `run_campaign()` / `run_campaign_async()` from Python code. See [Python Utility Functions](/api/utils) for the programmatic API and [Campaigns](/features/campaigns) for the full campaign creation guide.
+
+---
+
+## GET /whatsapp/api/campaigns/
+
+Retrieve the 50 most recent campaigns ordered by creation date (newest first). Requires the `X-API-Key` header — see [Authentication](/api/authentication).
+
+### Example
+
+```bash
+curl https://yourdomain.com/whatsapp/api/campaigns/ \
+  -H "X-API-Key: your-key"
+```
+
+### Success Response
+
+```json
+{
+  "campaigns": [
+    {
+      "id": 3,
+      "name": "Black Friday Promo",
+      "status": "completed",
+      "sent_count": 1850,
+      "failed_count": 12,
+      "created_at": "2024-11-29T08:00:00Z"
+    }
+  ]
+}
+```
+
+### Response Fields
+
+<ResponseField name="campaigns" type="array">
+  List of up to 50 campaign objects, sorted descending by `created_at`.
+
+  <Expandable title="Campaign object fields">
+    <ResponseField name="id" type="integer">
+      Primary key of the `WhatsAppCampaign` record.
+    </ResponseField>
+
+    <ResponseField name="name" type="string">
+      Human-readable campaign name as entered during creation.
+    </ResponseField>
+
+    <ResponseField name="status" type="string">
+      Current lifecycle state of the campaign. See the [status reference table](#campaign-statuses) below.
+    </ResponseField>
+
+    <ResponseField name="sent_count" type="integer">
+      Number of individual messages that were successfully dispatched to Meta's API.
+    </ResponseField>
+
+    <ResponseField name="failed_count" type="integer">
+      Number of messages that could not be sent due to API errors, invalid numbers, or opt-outs.
+    </ResponseField>
+
+    <ResponseField name="created_at" type="datetime">
+      ISO 8601 timestamp of when the campaign record was first created.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Campaign Statuses
+
+<a id="campaign-statuses"></a>
+
+| Status | Meaning |
+|--------|---------|
+| `draft` | Created in the dashboard but not yet queued or sent |
+| `scheduled` | Queued for a future send time via `scheduled_at` |
+| `running` | Currently dispatching messages to recipients |
+| `completed` | All send attempts have been made (check `failed_count` for partial failures) |
+| `failed` | The campaign could not start, typically due to a configuration error |
+| `paused` | Temporarily halted mid-send; can be resumed |
+
+---
+
+## Creating and Running Campaigns
+
+Campaign creation and triggering are handled outside the REST API. You have two options:
+
+**Dashboard UI:** Navigate to `/whatsapp/campaigns/` → **Add Campaign**, configure your template, audience, and optional schedule, then click **Run**.
+
+**Python code:** Call the utility function directly from your application logic or a Celery task:
+
+```python
+from django_meta_whatsapp.utils import run_campaign_async
+
+result = run_campaign_async(campaign_id=3)
+# result: {"queued": True} when a task queue is configured,
+#         or {"sent": 1850, "failed": 12} for synchronous execution
+```
+
+See [Python Utility Functions](/api/utils) for full parameter documentation and [Campaigns](/features/campaigns) for the campaign creation guide including audience providers, CSV uploads, and parameter mappings.

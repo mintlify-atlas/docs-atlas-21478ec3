@@ -1,0 +1,119 @@
+---
+title: "Contact Management — CRM for WhatsApp Contacts"
+sidebarTitle: "Contacts"
+description: "Manage your WhatsApp contact database: import from CSV, assign colored labels, filter by any field, track opt-outs, and export your entire list."
+---
+
+The Contacts section at `/whatsapp/contacts/` is your WhatsApp CRM. It stores phone numbers, names, emails, opt-out status, and blocked status for every contact that interacts with your business. Contacts are created automatically when an inbound message arrives via the webhook, and can also be added manually or imported in bulk from a CSV file.
+
+## WhatsAppContact model fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `phone` | `CharField` (unique) | Phone number with country code, e.g. `+919876543210` |
+| `name` | `CharField` | Display name |
+| `email` | `EmailField` | Email address |
+| `labels` | `ManyToManyField → WhatsAppLabel` | One or more colour-coded labels |
+| `notes` | `TextField` | Freeform internal notes |
+| `opted_out` | `BooleanField` | `True` if the contact has opted out of marketing messages |
+| `is_blocked` | `BooleanField` | `True` when synced from Meta's block list |
+| `subscribed_via_signup` | `FK → WhatsAppSignup` | Which signup deep link brought this contact in |
+| `subscribed_at` | `DateTimeField` | When the contact first subscribed |
+| `created_at` | `DateTimeField` | Record creation timestamp |
+| `updated_at` | `DateTimeField` | Last modification timestamp |
+
+**Computed properties:**
+
+- `display_name` — returns `name` if set, otherwise falls back to `phone`
+- `normalized_phone` — strips the leading `+` for use in Meta API calls
+
+## Importing contacts
+
+Bulk-import contacts at `/whatsapp/contacts/import/` by uploading a CSV file. The expected columns are:
+
+```csv
+Phone,Name,Email,Labels
++919876543210,Rahul Baberwal,rahul@example.com,"vip, lead"
++911234567890,Priya Sharma,priya@example.com,newsletter
+```
+
+**Column notes:**
+- `Phone` is the only required column. Rows without a phone number are skipped.
+- `Labels` can be a comma-separated list of label names. Labels that don't exist yet are created automatically.
+- Column headers are matched case-insensitively.
+
+**Import behaviour:**
+- If a contact with the given phone number already exists, its `name` and `email` are updated.
+- New contacts are created for phone numbers not yet in the database.
+- Skipped rows (missing phone) are counted and shown in the success message.
+
+**Download a sample CSV** to use as a template:
+
+```
+GET /whatsapp/contacts/import/?sample=1
+```
+
+This returns a ready-to-fill `sample_contacts.csv` file.
+
+## Exporting contacts
+
+Download your full contact list as a CSV:
+
+```
+GET /whatsapp/contacts/export/
+```
+
+The exported file (`whatsapp_contacts.csv`) contains the following columns:
+
+```
+phone, name, email, labels, opted_out, created_at
+```
+
+Labels are comma-joined in a single cell. The file is streamed directly — no intermediate storage is required.
+
+## Labels
+
+Labels are defined by the `WhatsAppLabel` model (`name`, `color`) and managed at `/whatsapp/labels/`. They are shared across Contacts and Conversations.
+
+**Available preset Tailwind colors:**
+
+`slate` · `red` · `orange` · `amber` · `emerald` · `teal` · `cyan` · `blue` · `indigo` · `violet` · `fuchsia` · `pink` · `rose`
+
+You can also enter any valid hex code (e.g. `#e11d48`) for a fully custom colour.
+
+## Filtering contacts
+
+The contact list supports search and label filtering via GET parameters:
+
+| Param | Example | Effect |
+|-------|---------|--------|
+| `q` | `?q=rahul` | Searches phone, name, and email (case-insensitive) |
+| `label` | `?label=vip` | Filters to contacts carrying the named label |
+
+Both params can be combined: `/whatsapp/contacts/?q=sharma&label=newsletter`
+
+## Opt-out tracking
+
+Setting `opted_out=True` on a contact prevents that contact from being included in any campaign send. The field can be toggled in the contact edit form at `/whatsapp/contacts/<pk>/edit/`.
+
+Contacts can self-opt-out by sending a keyword (e.g. "STOP") to your WhatsApp number — you can handle this in a webhook signal listener and set `opted_out=True` programmatically.
+
+## Programmatic access
+
+```python
+from django_meta_whatsapp.models import WhatsAppContact, WhatsAppLabel
+
+# Create a contact
+contact = WhatsAppContact.objects.create(
+    phone="+919876543210",
+    name="Rahul Baberwal",
+    email="rahul@example.com"
+)
+
+# Add a label (creates the label if it doesn't exist)
+vip_label, _ = WhatsAppLabel.objects.get_or_create(name="VIP", defaults={"color": "amber"})
+contact.labels.add(vip_label)
+
+# Filter opted-in, non-blocked contacts (the campaign-safe set)
+active_contacts = WhatsAppContact.objects.filter(opted_out=False, is_blocked=False)
+```

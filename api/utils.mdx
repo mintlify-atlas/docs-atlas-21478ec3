@@ -1,0 +1,610 @@
+---
+title: "Python Utility Functions — django-meta-whatsapp API"
+sidebarTitle: "Utility Functions"
+description: "Complete reference for all public utility functions in django_meta_whatsapp.utils — messaging, media, templates, campaigns, catalog, and blocked users."
+---
+
+The `django_meta_whatsapp.utils` module contains all low-level wrappers around the Meta WhatsApp Cloud API v22.0. Every function accepts an optional `account` (WhatsAppAccount instance) parameter; when omitted, credentials are read from the `WHATSAPP` Django settings dict.
+
+## Import
+
+```python
+from django_meta_whatsapp.utils import (
+    send_text_message,
+    send_location_message,
+    send_media_message,
+    send_template_message,
+    build_template_components,
+    upload_media,
+    sync_templates_from_meta,
+    push_template_to_meta,
+    delete_template_from_meta,
+    resolve_audience,
+    run_campaign,
+    run_campaign_async,
+    sync_catalog_products,
+    send_single_product_message,
+    send_multi_product_message,
+    send_catalog_message,
+    send_product_carousel_message,
+    send_catalog_link_message,
+    block_users,
+    unblock_users,
+    get_blocked_users,
+    sync_blocked_users_from_meta,
+    create_signup,
+    update_signup,
+    disable_signup,
+    list_signups,
+    get_signup,
+)
+```
+
+---
+
+## Messaging Functions
+
+### `send_text_message`
+
+```python
+send_text_message(phone_number, text, reply_message_id=None, account=None) -> dict
+```
+
+Sends a plain text WhatsApp message.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `phone_number` | `str` | Recipient phone with or without `+` and country code. 10-digit numbers default to +91 (India). |
+| `text` | `str` | Message body string. |
+| `reply_message_id` | `str \| None` | Optional Meta message ID to reply to (sets `context.message_id`). |
+| `account` | `WhatsAppAccount \| None` | Optional account instance; uses `WHATSAPP` settings if `None`. |
+
+**Returns:** Meta API response dict. The sent message WAMID is at `response["messages"][0]["id"]`.
+
+```python
+from django_meta_whatsapp.utils import send_text_message
+
+resp = send_text_message("919876543210", "Hello!")
+print(resp["messages"][0]["id"])  # wamid.ABC123
+```
+
+---
+
+### `send_location_message`
+
+```python
+send_location_message(
+    phone_number,
+    latitude,
+    longitude,
+    name='',
+    address='',
+    reply_message_id=None,
+    account=None,
+) -> dict
+```
+
+Sends a location pin message.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `phone_number` | `str` | Recipient phone number. |
+| `latitude` | `float` | Decimal degrees latitude. |
+| `longitude` | `float` | Decimal degrees longitude. |
+| `name` | `str` | Optional location label shown in chat. |
+| `address` | `str` | Optional address text shown below the pin. |
+| `reply_message_id` | `str \| None` | Optional Meta message ID to reply to. |
+| `account` | `WhatsAppAccount \| None` | Optional account instance. |
+
+**Returns:** Meta API response dict.
+
+```python
+from django_meta_whatsapp.utils import send_location_message
+
+send_location_message(
+    "919876543210",
+    latitude=28.6139,
+    longitude=77.2090,
+    name="New Delhi Office",
+    address="Connaught Place, New Delhi",
+)
+```
+
+---
+
+### `upload_media`
+
+```python
+upload_media(file_obj, mime_type, account=None) -> str
+```
+
+Uploads a file to Meta and returns the `media_id` string.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `file_obj` | file-like object | E.g. Django `InMemoryUploadedFile` or `open()`. |
+| `mime_type` | `str` | MIME type string, e.g. `"image/jpeg"`, `"application/pdf"`. |
+| `account` | `WhatsAppAccount \| None` | Optional account instance. |
+
+**Returns:** `media_id` string for use in `send_media_message()`.
+
+<Note>
+`.m4a` files are automatically re-typed to `audio/mp4` for Meta compatibility. This applies both when the filename ends in `.m4a` and when `mime_type` is `"audio/x-m4a"` or `"audio/m4a"`.
+</Note>
+
+```python
+from django_meta_whatsapp.utils import upload_media, send_media_message
+
+with open("invoice.pdf", "rb") as f:
+    media_id = upload_media(f, "application/pdf")
+
+send_media_message(
+    "919876543210",
+    media_id=media_id,
+    media_type="document",
+    filename="invoice.pdf",
+)
+```
+
+---
+
+### `send_media_message`
+
+```python
+send_media_message(
+    phone_number,
+    media_id,
+    media_type,
+    caption='',
+    filename='document',
+    reply_message_id=None,
+    account=None,
+) -> dict
+```
+
+Sends a pre-uploaded media file.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `phone_number` | `str` | Recipient phone number. |
+| `media_id` | `str` | ID returned by `upload_media()`. |
+| `media_type` | `str` | One of `"image"`, `"video"`, `"audio"`, `"document"`. |
+| `caption` | `str` | Optional caption (supported for `image`, `video`, and `document`). |
+| `filename` | `str` | Document filename shown to the recipient (`document` type only). |
+| `reply_message_id` | `str \| None` | Optional Meta message ID to reply to. |
+| `account` | `WhatsAppAccount \| None` | Optional account instance. |
+
+**Returns:** Meta API response dict.
+
+---
+
+### `send_template_message`
+
+```python
+send_template_message(
+    phone_number,
+    template_name,
+    language_code='en',
+    components=None,
+    account=None,
+) -> dict
+```
+
+Sends an approved WhatsApp template message.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `phone_number` | `str` | Recipient phone number. |
+| `template_name` | `str` | Exact name of the approved template on Meta. |
+| `language_code` | `str` | BCP-47 language code, e.g. `"en"`, `"hi"`, `"en_US"`. |
+| `components` | `list \| None` | Pre-built list from `build_template_components()`. If `None`, sends with no variables. |
+| `account` | `WhatsAppAccount \| None` | Optional account instance. |
+
+**Returns:** Meta API response dict.
+
+```python
+from django_meta_whatsapp.utils import send_template_message, build_template_components
+
+components = build_template_components(
+    body_params=["Rahul", "ORD-999"],
+)
+send_template_message("919876543210", "order_update", components=components)
+```
+
+---
+
+### `build_template_components`
+
+```python
+build_template_components(header_params=None, body_params=None, buttons=None) -> list
+```
+
+Helper to build a Meta template components list from plain Python values.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `header_params` | `list[str] \| None` | Text variable values for the header `{{1}}`, `{{2}}`… |
+| `body_params` | `list[str] \| None` | Text variable values for the body `{{1}}`, `{{2}}`… in order. |
+| `buttons` | `list[dict] \| None` | Each dict: `{"index": 0, "sub_type": "url"\|"quick_reply", "payload": "..."}`. |
+
+**Returns:** Ready-to-pass components list for `send_template_message()`.
+
+```python
+from django_meta_whatsapp.utils import build_template_components
+
+components = build_template_components(
+    header_params=["Order Shipped"],
+    body_params=["Rahul", "ORD-999"],
+    buttons=[{"index": 0, "sub_type": "quick_reply", "payload": "TRACK_ORDER"}],
+)
+```
+
+---
+
+## Template Management
+
+### `sync_templates_from_meta`
+
+```python
+sync_templates_from_meta(account=None) -> list
+```
+
+Fetches all approved/pending templates from Meta for the given account's WABA.
+
+- Requires `waba_id` on the account or `WHATSAPP["WABA_ID"]` in settings.
+- **Returns:** List of raw template dicts from the Meta API (`data` field).
+- The caller is responsible for creating or updating `WhatsAppTemplate` records from the returned data.
+
+---
+
+### `push_template_to_meta`
+
+```python
+push_template_to_meta(template_obj, account=None) -> dict
+```
+
+Submits a `WhatsAppTemplate` to Meta for creation and approval.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `template_obj` | `WhatsAppTemplate` | A `WhatsAppTemplate` model instance. |
+| `account` | `WhatsAppAccount \| None` | Overrides `template_obj.account` if provided. |
+
+Constructs the Meta components list from `template_obj.header`, `body_text`, `footer_text`, and `buttons`.
+
+**Returns:** Meta API response dict.
+
+---
+
+### `delete_template_from_meta`
+
+```python
+delete_template_from_meta(template_name, account=None) -> dict
+```
+
+Deletes a template from Meta by name.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `template_name` | `str` | The template name string (not the local database ID). |
+| `account` | `WhatsAppAccount \| None` | Optional account instance. |
+
+**Returns:** Meta API response dict.
+
+---
+
+## Campaign Functions
+
+### `resolve_audience`
+
+```python
+resolve_audience(campaign) -> list
+```
+
+Resolves the audience for a `WhatsAppCampaign` to a list of recipient dicts.
+
+**Returns:** `[{"phone": "...", "name": "...", "params": {...}}, ...]`
+
+Resolution is attempted in this order:
+
+1. **`WHATSAPP["CAMPAIGN_RESOLVER"]`** — a dotted-path to a custom resolver function that receives the campaign and returns the full recipient list.
+2. **`WHATSAPP["AUDIENCES"][campaign.audience_type]`** — a dotted-path to a named queryset provider function.
+3. **`audience_type == "contacts"`** — queries `WhatsAppContact` records, filtering `opted_out=False, is_blocked=False`. Additional filters from `campaign.audience_filters` are applied.
+4. **`audience_type == "csv"`** — parses `campaign.csv_file`; expects columns `phone`, `name` (case-insensitive).
+
+---
+
+### `run_campaign`
+
+```python
+run_campaign(campaign_id, account=None) -> dict
+```
+
+Synchronously executes a campaign (blocking call).
+
+- Resolves audience, sends template messages, and creates `WhatsAppCampaignRecipient` records.
+- Sets campaign `status` to `"running"` then `"completed"` (or `"failed"`).
+- **Returns:** `{"sent": N, "failed": N}`
+
+<Note>
+Use `run_campaign()` for small campaigns or testing. For large campaigns, use `run_campaign_async()` to avoid blocking the process.
+</Note>
+
+---
+
+### `run_campaign_async`
+
+```python
+run_campaign_async(campaign_id, account_id=None)
+```
+
+Queues a campaign via Celery if `WHATSAPP_USE_CELERY = True` in Django settings; otherwise runs synchronously.
+
+**Returns:**
+- `{"queued": True}` — if the task was successfully queued via Celery.
+- `{"sent": N, "failed": N}` — if executed synchronously.
+
+---
+
+## Catalog Functions
+
+### `sync_catalog_products`
+
+```python
+sync_catalog_products(catalog_id, account=None) -> dict
+```
+
+Fetches all products from Meta for the given `catalog_id` and upserts `WhatsAppCatalogProduct` records. Automatically paginates through all results.
+
+**Returns:** `{"synced": N}` where N is the total number of products upserted.
+
+---
+
+### `send_single_product_message`
+
+```python
+send_single_product_message(
+    phone_number,
+    catalog_id,
+    retailer_id,
+    body,
+    footer='',
+    account=None,
+) -> dict
+```
+
+Sends an interactive single-product card from a catalog.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `phone_number` | `str` | Recipient phone number. |
+| `catalog_id` | `str` | Meta Commerce catalog ID. |
+| `retailer_id` | `str` | The product's retailer ID within the catalog. |
+| `body` | `str` | Body text shown with the product card. |
+| `footer` | `str` | Optional footer text. |
+
+**Returns:** Meta API response dict.
+
+---
+
+### `send_multi_product_message`
+
+```python
+send_multi_product_message(
+    phone_number,
+    catalog_id,
+    sections,
+    header,
+    body,
+    footer='',
+    account=None,
+) -> dict
+```
+
+Sends an interactive product list grouped into sections.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `sections` | `list[dict]` | `[{"title": str, "product_items": [{"product_retailer_id": str}]}]` |
+| `header` | `str` | Header text shown above the product list. |
+| `body` | `str` | Body text. |
+| `footer` | `str` | Optional footer text. |
+
+**Returns:** Meta API response dict.
+
+---
+
+### `send_catalog_message`
+
+```python
+send_catalog_message(phone_number, thumbnail_retailer_id, body, footer='', account=None) -> dict
+```
+
+Sends a catalog message showing the full business catalog, with one product used as the thumbnail.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `thumbnail_retailer_id` | `str` | Retailer ID of the product to use as the catalog thumbnail. |
+| `body` | `str` | Body text. |
+| `footer` | `str` | Optional footer text. |
+
+**Returns:** Meta API response dict.
+
+---
+
+### `send_product_carousel_message`
+
+```python
+send_product_carousel_message(phone_number, catalog_id, retailer_ids, body, account=None) -> dict
+```
+
+Sends a horizontally scrollable product carousel.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `catalog_id` | `str` | Meta Commerce catalog ID. |
+| `retailer_ids` | `list[str]` | List of retailer ID strings displayed as carousel cards. |
+| `body` | `str` | Body text shown above the carousel. |
+
+**Returns:** Meta API response dict.
+
+---
+
+### `send_catalog_link_message`
+
+```python
+send_catalog_link_message(phone_number, wa_number, account=None) -> dict
+```
+
+Sends a plain text message containing `https://wa.me/c/<wa_number>` — a direct link to the business's WhatsApp catalog.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `wa_number` | `str` | The WhatsApp number associated with the catalog (without `+`). |
+
+**Returns:** Meta API response dict (delegates to `send_text_message`).
+
+---
+
+## Blocked Users Functions
+
+### `block_users`
+
+```python
+block_users(phone_numbers, account=None) -> dict
+```
+
+Blocks up to 1,000 users in a single Meta API call.
+
+- Updates local `WhatsAppBlockedUser` records for both successes and failures.
+- Sets `WhatsAppContact.is_blocked = True` for successfully blocked numbers.
+
+**Returns:** Meta response dict with `block_users.added_users` and `block_users.failed_users`.
+
+---
+
+### `unblock_users`
+
+```python
+unblock_users(phone_numbers, account=None) -> dict
+```
+
+Unblocks a list of users.
+
+- Sets `WhatsAppBlockedUser.is_active = False` and records `unblocked_at` for removed users.
+- Sets `WhatsAppContact.is_blocked = False`.
+
+**Returns:** Meta response dict with `block_users.removed_users`.
+
+---
+
+### `get_blocked_users`
+
+```python
+get_blocked_users(limit=100, after_cursor=None, account=None) -> dict
+```
+
+Fetches a paginated page of blocked users from Meta.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `limit` | `int` | Number of results per page (default `100`). |
+| `after_cursor` | `str \| None` | Pagination cursor from a previous response's `paging.cursors.after`. |
+
+**Returns:** Raw Meta response dict with `data[]` entries and `paging` cursors.
+
+---
+
+### `sync_blocked_users_from_meta`
+
+```python
+sync_blocked_users_from_meta(account=None) -> int
+```
+
+Full sync — paginates through all blocked users on Meta and updates local `WhatsAppBlockedUser` records. Also sets `WhatsAppContact.is_blocked = True` for matched contacts.
+
+**Returns:** Total count of records synced.
+
+---
+
+## In-App Signup Functions
+
+### `create_signup`
+
+```python
+create_signup(
+    display_name,
+    signup_message,
+    confirmation_message,
+    privacy_policy_url,
+    website_url='',
+    promo_code='',
+    account=None,
+) -> dict
+```
+
+Creates a new In-App Signup link via the Meta Graph API.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `display_name` | `str` | Internal label, not shown to subscribers. |
+| `signup_message` | `str` | Pre-consent screen text shown to the user inside WhatsApp. |
+| `confirmation_message` | `str` | Sent to the user after they subscribe. Use `{{promo_code}}` to embed the promo. |
+| `privacy_policy_url` | `str` | URL to privacy policy. **Immutable** after creation on Meta. |
+| `website_url` | `str` | Optional website URL. |
+| `promo_code` | `str` | Optional alphanumeric promo code. |
+| `account` | `WhatsAppAccount` | **Required.** Must have `waba_id` configured. |
+
+**Returns:** Meta API response dict including the `id` of the created signup.
+
+<Note>
+`create_signup()` requires a `WhatsAppAccount` instance with `waba_id` set. It raises `ValueError` if `account` is `None` or `account.waba_id` is empty.
+</Note>
+
+---
+
+### `list_signups`
+
+```python
+list_signups(account=None) -> list
+```
+
+Lists all In-App Signup links for the account's WABA.
+
+**Returns:** List of signup dicts from the Meta API `data` field.
+
+---
+
+### `get_signup`
+
+```python
+get_signup(signup_id, account=None) -> dict
+```
+
+Fetches full details of a specific signup link from Meta.
+
+**Returns:** Meta API response dict for the signup.
+
+---
+
+### `update_signup`
+
+```python
+update_signup(signup_id, promo_code=None, confirmation_message=None, account=None) -> dict
+```
+
+Updates mutable fields of a signup link. Only `promo_code` and `confirmation_message` can be changed after creation.
+
+**Returns:** Meta API response dict.
+
+---
+
+### `disable_signup`
+
+```python
+disable_signup(signup_id, account=None) -> dict
+```
+
+Disables a signup link by setting its `status` to `DISABLED` on Meta.
+
+**Returns:** Meta API response dict.

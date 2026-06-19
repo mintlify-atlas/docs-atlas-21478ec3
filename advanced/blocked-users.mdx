@@ -1,0 +1,108 @@
+---
+title: "Blocked Users — Sync and Manage WhatsApp Block Lists"
+sidebarTitle: "Blocked Users"
+description: "Block and unblock WhatsApp contacts, sync your block list from Meta, and prevent blocked users from receiving campaigns or inbox messages."
+---
+
+django-meta-whatsapp maintains a local mirror of Meta's block list in the `WhatsAppBlockedUser` model. Blocked users are automatically excluded from campaign sends and marked in the contact database, giving agents a clear view of who is blocked directly in the inbox.
+
+## WhatsAppBlockedUser Model Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey` | The `WhatsAppAccount` that owns this block record |
+| `phone_number` | `CharField` | Blocked phone number in `+E.164` format (e.g. `"+919876543210"`) |
+| `wa_id` | `CharField` | Meta's internal `wa_id`, which may differ from the phone number |
+| `blocked_at` | `DateTimeField` | Auto-set timestamp when the block record was created |
+| `blocked_by` | `CharField` | Username or email of the agent who triggered the block |
+| `reason` | `TextField` | Internal note (e.g. `"spam"`, `"abuse"`) |
+| `is_active` | `BooleanField` | `True` = currently blocked; `False` = unblocked (record kept for audit history) |
+| `unblocked_at` | `DateTimeField` | Timestamp when the user was unblocked (`null` if still blocked) |
+| `unblocked_by` | `CharField` | Username or email of the agent who unblocked the user |
+| `meta_error` | `TextField` | Error detail stored if the Meta block API call failed |
+
+Records are uniquely identified by `(account, phone_number)`. Unblocking a user sets `is_active=False` but retains the record for audit trail purposes.
+
+## Blocking a User
+
+Use `block_users()` to block one or more phone numbers. The function calls Meta's block API and then updates the local `WhatsAppBlockedUser` and `WhatsAppContact` records.
+
+```python
+from django_meta_whatsapp.utils import block_users
+from django_meta_whatsapp.models import WhatsAppAccount
+
+account = WhatsAppAccount.objects.get(pk=1)
+result = block_users(["+919876543210", "+911234567890"], account=account)
+
+added = result["block_users"]["added_users"]
+failed = result["block_users"]["failed_users"]
+print(f"Blocked: {len(added)}, Failed: {len(failed)}")
+```
+
+For each successfully blocked number:
+
+- A `WhatsAppBlockedUser` record is created or updated with `is_active=True`
+- The corresponding `WhatsAppContact.is_blocked` is set to `True` for fast inbox filtering
+
+For each failed number, the `WhatsAppBlockedUser` record stores the Meta error in `meta_error` with `is_active=False`.
+
+<Warning>
+Meta's block API only allows blocking users who have initiated a conversation with your business within the past 24 hours. Attempting to block contacts who haven't messaged recently will return an error in `failed_users`.
+</Warning>
+
+## Unblocking a User
+
+Use `unblock_users()` to remove one or more phone numbers from the block list.
+
+```python
+from django_meta_whatsapp.utils import unblock_users
+
+result = unblock_users(["+919876543210"], account=account)
+```
+
+For each successfully unblocked number:
+
+- The `WhatsAppBlockedUser` record is updated: `is_active=False`, `unblocked_at=now()`
+- The corresponding `WhatsAppContact.is_blocked` is set to `False`
+
+The `WhatsAppBlockedUser` record is **kept** with `is_active=False` so you maintain a full audit history of who was blocked and when.
+
+## Syncing the Block List from Meta
+
+To pull the current state of Meta's block list and reconcile it with your local database, use `sync_blocked_users_from_meta()`:
+
+```python
+from django_meta_whatsapp.utils import sync_blocked_users_from_meta
+
+synced_count = sync_blocked_users_from_meta(account=account)
+print(f"Synced {synced_count} blocked users from Meta")
+```
+
+The function:
+
+1. Paginates through all blocked users on Meta (100 per page) using cursor-based pagination
+2. Creates or updates local `WhatsAppBlockedUser` records with `is_active=True`
+3. Sets `WhatsAppContact.is_blocked=True` for any matching contact records
+
+You can also trigger this sync from the dashboard at `/whatsapp/contacts/blocked/sync/`.
+
+## Bulk Operations
+
+For blocking or unblocking large sets of contacts at once:
+
+| Operation | UI Endpoint | Python function |
+|---|---|---|
+| Bulk block | POST `/whatsapp/contacts/bulk-block/` with `phones` list | `block_users(phone_list, account=account)` |
+| Bulk unblock | POST `/whatsapp/contacts/bulk-unblock/` with `phones` list | `unblock_users(phone_list, account=account)` |
+
+Both `block_users()` and `unblock_users()` accept lists of up to 1,000 phone numbers per call, matching Meta's API limit.
+
+## Campaign Exclusion
+
+Blocked contacts are automatically excluded from campaign sends. When `audience_type="contacts"`, the campaign audience resolver filters the contact queryset as:
+
+```python
+WhatsAppContact.objects.filter(opted_out=False, is_blocked=False)
+```
+
+This means you do not need to manually remove blocked contacts from your audience — the exclusion happens automatically at send time based on the `is_blocked` flag on `WhatsAppContact`.

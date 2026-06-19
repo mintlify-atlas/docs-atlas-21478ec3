@@ -1,0 +1,71 @@
+---
+title: "django-meta-whatsapp: WhatsApp CRM Engine for Django"
+sidebarTitle: "Introduction"
+description: "django-meta-whatsapp is a drop-in Django package that adds a complete WhatsApp Cloud Platform — inbox, campaigns, webhooks, and REST APIs — to your project."
+---
+
+**`django-meta-whatsapp`** is a production-ready, drop-in Django library that wraps the **Meta WhatsApp Cloud API v22.0** and delivers a full-featured CRM and messaging platform directly inside your existing Django project. Rather than routing data through a third-party SaaS, everything — the inbox, campaign engine, webhook receiver, template sync, and REST API layer — runs in your own infrastructure. It ships with a beautiful Tailwind UI, supports multiple WhatsApp Business Accounts from a single Django project, and works with or without Celery for async campaign dispatch.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install the package and send your first WhatsApp message in under 5 minutes.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Full reference for the `WHATSAPP` settings dict — credentials, UI, audiences, and more.
+  </Card>
+  <Card title="Core Features" icon="inbox" href="/features/inbox">
+    Explore the live unified inbox, reply threading, and media support.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/authentication">
+    REST API endpoints, authentication, and cURL examples.
+  </Card>
+</CardGroup>
+
+---
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Live Unified Inbox" icon="inbox" href="/features/inbox">
+    Real-time chat interface with media support, reply threading, and delivery status ticks. All conversations in one place.
+  </Card>
+  <Card title="Marketing Campaigns" icon="bullhorn" href="/features/campaigns">
+    Schedule and send bulk messages using approved WhatsApp Templates. Track delivery, read rates, and bounce rates.
+  </Card>
+  <Card title="Contact Management" icon="address-book" href="/features/contacts">
+    Import contacts via CSV, assign dynamic colored labels, and auto-sync users who subscribe via WhatsApp deep-links.
+  </Card>
+  <Card title="Message Templates" icon="file-lines" href="/features/templates">
+    Sync approved templates from Meta with one click, or create and push new ones directly from the dashboard.
+  </Card>
+  <Card title="In-App Signups" icon="link" href="/features/signups">
+    Create and manage `wa.me` deep-links so users can instantly opt in to your WhatsApp channel.
+  </Card>
+  <Card title="Webhook Engine" icon="bolt" href="/integrations/webhooks">
+    Built-in webhook endpoint automatically ingests incoming messages, delivery receipts, and status updates from Meta.
+  </Card>
+  <Card title="Multi-Account Support" icon="building" href="/advanced/multi-account">
+    Run one Django project with multiple WhatsApp Business Accounts. Switch the global account from the dashboard.
+  </Card>
+  <Card title="REST API" icon="code" href="/api/authentication">
+    Send text, location, and templates; list chats and campaigns — all behind API-key authentication.
+  </Card>
+</CardGroup>
+
+---
+
+## Requirements
+
+| Requirement | Minimum Version |
+|---|---|
+| Python | 3.9+ |
+| Django | 4.0, 5.0, or 5.1 |
+| `requests` | 2.28+ |
+
+The only **hard dependencies** are `Django` and `requests`. Celery (`celery>=5.0` and `django-celery-beat>=2.0`) is an optional extra for async campaign execution and is never required for the core feature set.
+
+---
+
+<Note>
+  **`django-meta-whatsapp`** is released under the **MIT License** and is free to use in personal and commercial projects. See the [LICENSE](https://github.com/rahul-baberwal/django-meta-whatsapp/blob/main/LICENSE) file for details.
+</Note>

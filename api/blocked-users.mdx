@@ -1,0 +1,144 @@
+---
+title: "Blocked Users REST API — Block, Unblock, and List"
+sidebarTitle: "Blocked Users"
+description: "HTTP endpoints to block and unblock WhatsApp contacts via the REST API. All endpoints require X-API-Key authentication."
+---
+
+The blocked users REST API lets you block and unblock WhatsApp contacts programmatically and retrieve your current block list. Blocks are applied on Meta's platform and mirrored locally in the `WhatsAppBlockedUser` model for fast filtering in the inbox UI. All three endpoints require the `X-API-Key` header — see [Authentication](/api/authentication).
+
+---
+
+## POST /whatsapp/api/block/
+
+Block a WhatsApp contact. The block is applied on Meta and mirrored locally in `WhatsAppBlockedUser`. The corresponding `WhatsAppContact` record is also marked `is_blocked=True` for fast inbox UI filtering.
+
+### Request Body
+
+```json
+{"phone": "+919876543210"}
+```
+
+<ParamField body="phone" type="string" required>
+  Phone number of the contact to block, including the country code with a leading `+`. Example: `"+919876543210"`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X POST https://yourdomain.com/whatsapp/api/block/ \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "+919876543210"}'
+```
+
+### Success Response
+
+```json
+{
+  "status": "success",
+  "meta_response": {
+    "block_users": {
+      "added_users": [{"input": "+919876543210", "wa_id": "919876543210"}],
+      "failed_users": []
+    }
+  }
+}
+```
+
+If Meta rejects the block (e.g. the contact hasn't messaged in the past 24 hours), the number appears in `failed_users` with an error detail rather than `added_users`. Check `meta_response.block_users.failed_users` even on a `200` response.
+
+---
+
+## DELETE /whatsapp/api/unblock/
+
+Unblock a WhatsApp contact. The unblock is applied on Meta and the local `WhatsAppBlockedUser` record is marked `is_active=False` — the history record is preserved for audit purposes.
+
+### Request Body
+
+```json
+{"phone": "+919876543210"}
+```
+
+<ParamField body="phone" type="string" required>
+  Phone number of the contact to unblock, including the country code with a leading `+`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X DELETE https://yourdomain.com/whatsapp/api/unblock/ \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "+919876543210"}'
+```
+
+### Success Response
+
+```json
+{
+  "status": "success",
+  "meta_response": {
+    "block_users": {
+      "removed_users": [{"input": "+919876543210", "wa_id": "919876543210"}],
+      "failed_users": []
+    }
+  }
+}
+```
+
+---
+
+## GET /whatsapp/api/blocked/
+
+List all currently active blocked users for the first active `WhatsAppAccount`. Only records where `is_active=True` are returned — unblocked contacts (historical records) are excluded.
+
+### Example
+
+```bash
+curl https://yourdomain.com/whatsapp/api/blocked/ \
+  -H "X-API-Key: your-key"
+```
+
+### Success Response
+
+```json
+{
+  "blocked_users": [
+    {
+      "phone_number": "+919876543210",
+      "blocked_at": "2024-01-10T09:15:00Z",
+      "reason": "spam"
+    }
+  ]
+}
+```
+
+### Response Fields
+
+<ResponseField name="blocked_users" type="array">
+  List of all active `WhatsAppBlockedUser` objects for the account.
+
+  <Expandable title="Blocked user object fields">
+    <ResponseField name="phone_number" type="string">
+      The blocked contact's phone number, stored as entered (e.g. `"+919876543210"`).
+    </ResponseField>
+
+    <ResponseField name="blocked_at" type="datetime">
+      ISO 8601 timestamp of when the block was applied. Set automatically by `auto_now_add` on the model.
+    </ResponseField>
+
+    <ResponseField name="reason" type="string">
+      Internal note stored at block time (e.g. `"spam"`, `"abuse"`). Empty string if no reason was recorded.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+<Warning>
+  Meta only allows blocking users who have sent a message to your business within the past 24 hours. Attempting to block an older contact will result in their number appearing in the `failed_users` array in the `meta_response`, even though the API returns HTTP 200. Always inspect `meta_response.block_users.failed_users` to confirm the block was applied.
+</Warning>
+
+<Tip>
+  For bulk operations — blocking or unblocking up to 1,000 contacts in a single API call to Meta — use the Python `block_users()` utility function instead of calling this endpoint in a loop. See [Python Utility Functions](/api/utils) for full usage and [Blocked Users](/advanced/blocked-users) for advanced sync patterns including CSV import and scheduled cleanup jobs.
+</Tip>

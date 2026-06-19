@@ -1,0 +1,117 @@
+---
+title: "In-App Signups — WhatsApp Opt-In Deep Links"
+sidebarTitle: "Signups"
+description: "Create shareable wa.me deep links that let users opt in to your WhatsApp messaging list, with custom consent screens, promo codes, and auto-labeling."
+---
+
+In-App Signups are `wa.me/<phone>/signup/<id>` deep links that let users opt in to your WhatsApp messaging channel directly from their app. When a user taps the link, WhatsApp opens and displays your custom consent screen before the subscription is confirmed. django-meta-whatsapp manages the full lifecycle — creation, delivery of confirmation messages, promo codes, and automatic contact labelling — via the Meta Graph API.
+
+## WhatsAppSignup model fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `account` | `FK → WhatsAppAccount` | The WhatsApp account that owns this signup link |
+| `signup_id` | `CharField` (unique) | ID returned by Meta after creation — immutable |
+| `display_name` | `CharField` | Internal label for your reference; not shown to users |
+| `signup_message` | `TextField` | Pre-consent screen text shown to the user inside WhatsApp |
+| `confirmation_message` | `TextField` | Message sent to the user automatically after they subscribe. Use `{{promo_code}}` as a placeholder |
+| `privacy_policy_url` | `URLField` | Link to your privacy policy — **immutable after creation on Meta** |
+| `website_url` | `URLField` | Optional website link displayed alongside the signup |
+| `promo_code` | `CharField` | Alphanumeric code that replaces `{{promo_code}}` in the confirmation message |
+| `status` | `CharField` | `ACTIVE` or `DISABLED` |
+| `auto_add_to_label` | `FK → WhatsAppLabel` | Label automatically assigned to new subscribers |
+| `subscriber_count` | `PositiveIntegerField` | Running total updated from Meta webhook events |
+| `tos_accepted` | `BooleanField` | `True` once Meta's Terms of Service have been accepted on first creation |
+| `created_at` / `updated_at` | `DateTimeField` | Record timestamps |
+
+## Creating a signup link
+
+**Via the dashboard:** go to `/whatsapp/signups/add/` and fill in the required fields: `display_name`, `signup_message`, `confirmation_message`, and `privacy_policy_url`. On save, `SignupCreateView` calls `create_signup()` and stores the returned `signup_id` locally.
+
+**Via Python:**
+
+```python
+from django_meta_whatsapp.utils import create_signup
+from django_meta_whatsapp.models import WhatsAppAccount
+
+account = WhatsAppAccount.objects.get(pk=1)
+result = create_signup(
+    display_name="Newsletter Signup",
+    signup_message="Subscribe to get exclusive offers from Our Store!",
+    confirmation_message="Thanks for subscribing! Your promo code: {{promo_code}}",
+    privacy_policy_url="https://yoursite.com/privacy",
+    promo_code="WELCOME10",
+    account=account
+)
+signup_id = result["id"]
+```
+
+`create_signup` POSTs to `/{waba_id}/signups` on the Meta Graph API and returns the raw response dict. The `signup_id` field on the local `WhatsAppSignup` record is set to `result["id"]`.
+
+## Generating the deep link
+
+Use the `get_deep_link` method on a `WhatsAppSignup` instance to build the shareable URL for any phone number:
+
+```python
+from django_meta_whatsapp.models import WhatsAppSignup
+
+signup = WhatsAppSignup.objects.get(pk=1)
+deep_link = signup.get_deep_link("+919876543210")
+# Returns: https://wa.me/919876543210/signup/<signup_id>
+```
+
+The method strips the leading `+` from the phone number automatically. You can embed this URL in your website, mobile app, or email campaigns.
+
+## Auto-labeling subscribers
+
+Set `auto_add_to_label` to any `WhatsAppLabel` when creating or editing a signup link. When the Meta webhook fires a subscription event for this signup, the webhook handler:
+
+1. Creates or retrieves the `WhatsAppContact` for the subscriber's phone number
+2. Adds the `auto_add_to_label` label to the contact's `labels` ManyToMany
+3. Sets `contact.subscribed_via_signup` and `contact.subscribed_at`
+
+This lets you segment subscribers by source immediately, without any manual steps.
+
+## Updating and disabling
+
+Meta restricts which fields can be changed after a signup link is created. Only `promo_code` and `confirmation_message` are mutable.
+
+**Update via the dashboard:** `/whatsapp/signups/<pk>/edit/` exposes only those two fields plus `auto_add_to_label` (a local-only field).
+
+**Update via Python:**
+
+```python
+from django_meta_whatsapp.utils import update_signup
+
+update_signup(
+    signup_id="<signup_id>",
+    promo_code="SUMMER20",
+    confirmation_message="Welcome! Use code {{promo_code}} for 20% off.",
+    account=account
+)
+```
+
+**Disable a signup link:**
+
+```python
+from django_meta_whatsapp.utils import disable_signup
+
+disable_signup("<signup_id>", account=account)
+```
+
+Or POST to `/whatsapp/signups/<pk>/disable/` from the dashboard. The local `status` is set to `"DISABLED"` and the link is deactivated on Meta. Disabled links cannot be re-enabled.
+
+## Webhook events
+
+When a user subscribes via a signup link, Meta sends a webhook event with `field = "in_app_signup"`. The `WebhookView._process()` handler:
+
+1. Parses the event and extracts the subscriber's phone number and the `signup_id`
+2. Calls `WhatsAppContact.objects.get_or_create(phone=...)` to upsert the contact record
+3. Sets `subscribed_via_signup` and `subscribed_at` on the contact
+4. Increments `WhatsAppSignup.subscriber_count`
+5. Applies `auto_add_to_label` if configured
+6. Fires the `whatsapp_user_subscribed` Django signal so your project code can react (e.g. send a welcome flow, trigger a CRM sync)
+
+<Note>
+A `WhatsAppAccount` with a `waba_id` configured is required to create In-App Signups. The WABA ID must be set either on the account record (`account.waba_id`) or in `WHATSAPP['WABA_ID']` in Django settings. Without it, `create_signup` will raise a `ValueError`.
+</Note>

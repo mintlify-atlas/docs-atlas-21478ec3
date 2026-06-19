@@ -1,0 +1,140 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "django-meta-whatsapp",
+  "projectDescription": "A production-ready Django package that embeds a full-featured WhatsApp Cloud Platform engine — including a live inbox, bulk marketing campaigns, webhook engine, contact CRM, and REST APIs — directly into any Django project.",
+  "theme": "luma",
+  "primaryColor": "#25D366",
+  "lightColor": "#dcfce7",
+  "darkColor": "#166534",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/inbox",
+              "features/contacts",
+              "features/templates",
+              "features/campaigns",
+              "features/signups"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/user-model",
+              "integrations/signals",
+              "integrations/celery",
+              "integrations/webhooks"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/multi-account",
+              "advanced/catalog",
+              "advanced/blocked-users",
+              "advanced/management-commands"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "REST API",
+            "pages": [
+              "api/authentication",
+              "api/messaging",
+              "api/campaigns",
+              "api/blocked-users"
+            ]
+          },
+          {
+            "group": "Python API",
+            "pages": [
+              "api/utils",
+              "api/models",
+              "api/signals-reference"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Live real-time inbox with media support, reply threading, and message status ticks",
+    "Bulk marketing campaigns using approved WhatsApp Templates with delivery analytics",
+    "Contact management with CSV import/export, labels, and opt-out tracking",
+    "Webhook engine that auto-ingests inbound messages, delivery receipts, and status updates",
+    "REST API endpoints for sending text, location, and template messages (X-API-Key auth)",
+    "Multi-account support: one Django project hosting multiple WhatsApp Business Accounts",
+    "In-App Signup deep links (wa.me) for user opt-in flows",
+    "Blocked user sync with Meta's block list",
+    "Meta Commerce Catalog integration for product messages",
+    "Optional Celery integration for async campaign execution",
+    "Django signals: whatsapp_message_received, whatsapp_campaign_completed, whatsapp_user_subscribed",
+    "Management command: wa_sync_templates"
+  ],
+  "publicApiSurface": [
+    "send_text_message(phone_number, text, reply_message_id, account)",
+    "send_location_message(phone_number, latitude, longitude, name, address, account)",
+    "send_media_message(phone_number, media_id, media_type, caption, filename, account)",
+    "send_template_message(phone_number, template_name, language_code, components, account)",
+    "build_template_components(header_params, body_params, buttons)",
+    "upload_media(file_obj, mime_type, account)",
+    "sync_templates_from_meta(account)",
+    "push_template_to_meta(template_obj, account)",
+    "delete_template_from_meta(template_name, account)",
+    "resolve_audience(campaign)",
+    "run_campaign(campaign_id, account)",
+    "run_campaign_async(campaign_id, account_id)",
+    "sync_catalog_products(catalog_id, account)",
+    "send_single_product_message(phone_number, catalog_id, retailer_id, body, footer, account)",
+    "send_multi_product_message(phone_number, catalog_id, sections, header, body, footer, account)",
+    "send_catalog_message(phone_number, thumbnail_retailer_id, body, footer, account)",
+    "block_users(phone_numbers, account)",
+    "unblock_users(phone_numbers, account)",
+    "sync_blocked_users_from_meta(account)",
+    "create_signup(display_name, signup_message, confirmation_message, privacy_policy_url, account)",
+    "update_signup(signup_id, promo_code, confirmation_message, account)",
+    "disable_signup(signup_id, account)",
+    "WhatsAppAccount model",
+    "WhatsAppContact model",
+    "WhatsAppConversation model",
+    "WhatsAppMessage model",
+    "WhatsAppTemplate model",
+    "WhatsAppCampaign model",
+    "WhatsAppCampaignRecipient model",
+    "WhatsAppLabel model",
+    "WhatsAppSignup model",
+    "WhatsAppAPIKey model",
+    "WhatsAppCatalogProduct model",
+    "WhatsAppBlockedUser model",
+    "WhatsAppWebhookLog model",
+    "whatsapp_message_received signal",
+    "whatsapp_message_sent signal",
+    "whatsapp_campaign_completed signal",
+    "whatsapp_user_subscribed signal",
+    "wa_sync_templates management command",
+    "POST /whatsapp/api/send-message/",
+    "POST /whatsapp/api/send-location/",
+    "POST /whatsapp/api/send-template/",
+    "GET /whatsapp/api/chats/",
+    "GET /whatsapp/api/campaigns/",
+    "POST /whatsapp/api/block/",
+    "DELETE /whatsapp/api/unblock/",
+    "GET /whatsapp/api/blocked/"
+  ]
+}

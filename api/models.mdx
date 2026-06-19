@@ -1,0 +1,567 @@
+---
+title: "Django Models Reference — django-meta-whatsapp Data Layer"
+sidebarTitle: "Models"
+description: "Reference for all Django ORM models in django-meta-whatsapp: accounts, contacts, conversations, messages, templates, campaigns, and more."
+---
+
+django-meta-whatsapp defines 14 Django models that store all WhatsApp data locally. Import them from `django_meta_whatsapp.models`. All models are registered with Django Admin.
+
+## Import
+
+```python
+from django_meta_whatsapp.models import (
+    WhatsAppAccount,
+    WhatsAppContact,
+    WhatsAppConversation,
+    WhatsAppMessage,
+    WhatsAppTemplate,
+    WhatsAppCampaign,
+    WhatsAppCampaignRecipient,
+    WhatsAppLabel,
+    WhatsAppSignup,
+    WhatsAppAPIKey,
+    WhatsAppMedia,
+    WhatsAppCatalogProduct,
+    WhatsAppBlockedUser,
+    WhatsAppWebhookLog,
+)
+```
+
+---
+
+## WhatsAppAccount
+
+Multi-account support: one row per WhatsApp Business Account. A single Django project can serve multiple businesses, each with their own credentials and phone number.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `CharField(255)` | Friendly label, e.g. `"My Business"`. |
+| `access_token` | `TextField` | Meta permanent or system-user access token. |
+| `phone_number_id` | `CharField(100)` | Meta phone number ID. |
+| `waba_id` | `CharField(100)` | WhatsApp Business Account ID (required for templates, signups). |
+| `verify_token` | `CharField(255)` | Webhook verification token — auto-generated UUID on creation. |
+| `profile_name` | `CharField(255)` | Business display name fetched via Graph API. |
+| `profile_picture_url` | `URLField` | Profile picture URL fetched via Graph API. |
+| `default_catalog_id` | `CharField(255)` | Default Meta Commerce Catalog ID for this account. |
+| `is_active` | `BooleanField` | `True` if the account is enabled. |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppAccount
+
+active_accounts = WhatsAppAccount.objects.filter(is_active=True)
+account = WhatsAppAccount.objects.get(phone_number_id="1234567890")
+```
+
+---
+
+## WhatsAppContact
+
+Stores every known WhatsApp contact — created automatically on first message or signup, or manually.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `phone` | `CharField(30)` | Phone number, unique across the table. |
+| `name` | `CharField(255)` | Contact display name. |
+| `email` | `EmailField` | Optional email address. |
+| `labels` | `ManyToManyField(WhatsAppLabel)` | Tags applied to this contact. |
+| `notes` | `TextField` | Internal notes. |
+| `opted_out` | `BooleanField` | `True` if the contact has opted out of marketing. |
+| `is_blocked` | `BooleanField` | Synced from `WhatsAppBlockedUser` — for fast inbox UI filtering. |
+| `subscribed_via_signup` | `ForeignKey(WhatsAppSignup)` | The signup link that brought this contact in (nullable). |
+| `subscribed_at` | `DateTimeField` | When the contact subscribed (nullable). |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+| `updated_at` | `DateTimeField` | Auto-set on every save. |
+
+### Properties
+
+| Property | Returns | Description |
+|---|---|---|
+| `display_name` | `str` | Returns `name` if set, otherwise falls back to `phone`. |
+| `normalized_phone` | `str` | Returns `phone` with any leading `+` stripped, for use in API calls. |
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppContact
+
+# All reachable contacts
+reachable = WhatsAppContact.objects.filter(opted_out=False, is_blocked=False)
+
+# Look up by phone
+contact = WhatsAppContact.objects.get(phone="+919876543210")
+print(contact.display_name)       # "Rahul" or "+919876543210"
+print(contact.normalized_phone)   # "919876543210"
+```
+
+---
+
+## WhatsAppConversation
+
+One row per unique phone number that has had any interaction. Conversations are the top-level entity in the inbox — messages belong to a conversation.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey(WhatsAppAccount)` | The account this conversation belongs to (nullable). |
+| `contact` | `ForeignKey(WhatsAppContact)` | Linked contact record (nullable — may not exist for brand-new numbers). |
+| `phone_number` | `CharField(30)` | Fallback phone number when no contact record exists yet. |
+| `label` | `ForeignKey(WhatsAppLabel)` | Optional label applied to the conversation. |
+| `is_resolved` | `BooleanField` | `True` if the conversation is marked resolved. |
+| `assigned_to` | `CharField(255)` | Agent username or email assigned to this conversation. |
+| `last_message_at` | `DateTimeField` | Timestamp of the most recent message. |
+| `unread_count` | `PositiveIntegerField` | Number of unread inbound messages. |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+
+**Default ordering:** `-last_message_at` (most recent first).
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppConversation
+
+# Open, unresolved conversations
+open_convs = WhatsAppConversation.objects.filter(is_resolved=False)
+
+# All messages in a conversation
+conv = WhatsAppConversation.objects.get(phone_number="+919876543210")
+messages = conv.messages.order_by("timestamp")
+```
+
+---
+
+## WhatsAppMessage
+
+Every message sent or received — both inbound from customers and outbound from your system.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `conversation` | `ForeignKey(WhatsAppConversation)` | Parent conversation (nullable). |
+| `account` | `ForeignKey(WhatsAppAccount)` | The account this message belongs to (nullable). |
+| `phone_number` | `CharField(30)` | The remote phone number. |
+| `message_id` | `CharField(255)` | Meta WAMID (unique). |
+| `message_type` | `CharField(20)` | See message types table below. |
+| `message_body` | `TextField` | Text content of the message. |
+| `direction` | `CharField(10)` | `"inbound"` or `"outbound"`. |
+| `status` | `CharField(20)` | `"sent"`, `"delivered"`, `"read"`, or `"failed"`. |
+| `media_file` | `FileField` | Locally stored media file (`whatsapp_media/`). |
+| `media_id` | `CharField(255)` | Meta media ID. |
+| `media_url` | `URLField` | Meta-hosted media URL. |
+| `media_mime_type` | `CharField(100)` | MIME type of the media. |
+| `media_filename` | `CharField(255)` | Original filename (for documents). |
+| `location_latitude` | `FloatField` | Latitude for location messages. |
+| `location_longitude` | `FloatField` | Longitude for location messages. |
+| `location_name` | `CharField(255)` | Location label for location messages. |
+| `location_address` | `TextField` | Address text for location messages. |
+| `reaction_emoji` | `CharField(10)` | Emoji for reaction messages. |
+| `reaction_to_message_id` | `CharField(255)` | WAMID of the message being reacted to. |
+| `reply_to` | `ForeignKey("self")` | Self-referential FK for threaded replies. |
+| `timestamp` | `DateTimeField` | Message timestamp (defaults to `timezone.now`). |
+| `is_deleted` | `BooleanField` | `True` if the message was deleted/revoked. |
+| `raw_payload` | `JSONField` | Full webhook JSON payload for debugging. |
+
+**Default ordering:** `timestamp` (chronological).
+
+### Message Types
+
+| Value | Display |
+|---|---|
+| `text` | Text |
+| `image` | Image |
+| `video` | Video |
+| `audio` | Audio |
+| `document` | Document |
+| `location` | Location |
+| `template` | Template |
+| `reaction` | Reaction |
+| `sticker` | Sticker |
+| `interactive` | Interactive |
+| `button` | Button |
+| `unknown` | Unknown |
+
+### Properties
+
+| Property | Returns | Description |
+|---|---|---|
+| `is_location` | `bool` | `True` if `message_type == "location"`. |
+| `has_media` | `bool` | `True` if `message_type` is one of `image`, `video`, `audio`, `document`, or `sticker`. |
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppMessage
+
+# All unread inbound messages
+inbound = WhatsAppMessage.objects.filter(direction="inbound", status="sent")
+
+# Media messages from a specific number
+media_msgs = WhatsAppMessage.objects.filter(
+    phone_number="+919876543210",
+    direction="inbound",
+).exclude(media_id=None)
+
+for msg in media_msgs:
+    if msg.has_media:
+        print(msg.media_filename, msg.media_url)
+```
+
+---
+
+## WhatsAppTemplate
+
+Approved message templates, synced from Meta or pushed to Meta for approval.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey(WhatsAppAccount)` | The account this template belongs to (nullable). |
+| `name` | `CharField(512)` | Template name (must match Meta exactly). |
+| `meta_template_id` | `CharField(255)` | Template ID assigned by Meta. |
+| `language` | `CharField(10)` | BCP-47 language code, default `"en"`. |
+| `category` | `CharField(30)` | `"MARKETING"`, `"UTILITY"`, or `"AUTHENTICATION"`. |
+| `status` | `CharField(20)` | `"APPROVED"`, `"PENDING"`, `"REJECTED"`, or `"DRAFT"`. |
+| `header` | `JSONField` | Header component (nullable). See format below. |
+| `body_text` | `TextField` | Body text. Use `{{1}}`, `{{2}}` for variables. |
+| `footer_text` | `CharField(255)` | Optional footer text. |
+| `buttons` | `JSONField` | List of button dicts. See format below. |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+| `updated_at` | `DateTimeField` | Auto-set on every save. |
+
+**Unique constraint:** `(account, name, language)`
+
+**Default ordering:** `-created_at`
+
+### JSON Field Formats
+
+**`header`:**
+```json
+{"type": "TEXT", "text": "Your order is ready"}
+```
+`type` can be `"TEXT"`, `"IMAGE"`, `"VIDEO"`, or `"DOCUMENT"`.
+
+**`buttons`:**
+```json
+[
+  {"type": "QUICK_REPLY", "text": "Yes"},
+  {"type": "URL", "text": "Track Order", "url": "https://example.com/track/{{1}}"}
+]
+```
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppTemplate
+
+approved = WhatsAppTemplate.objects.filter(
+    account=account,
+    status="APPROVED",
+    language="en",
+)
+```
+
+---
+
+## WhatsAppCampaign
+
+A bulk send job that sends a template message to a resolved audience.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey(WhatsAppAccount)` | Owning account (nullable). |
+| `name` | `CharField(255)` | Human-readable campaign name. |
+| `template` | `ForeignKey(WhatsAppTemplate)` | The template to send. |
+| `audience_type` | `CharField(50)` | `"contacts"`, `"csv"`, or a custom key from `WHATSAPP["AUDIENCES"]`. |
+| `audience_filters` | `JSONField` | Extra filter kwargs passed to the audience provider (e.g. `{"labels__name": "VIP"}`). |
+| `csv_file` | `FileField` | CSV file upload for `audience_type="csv"` (`whatsapp_campaign_csv/`). |
+| `parameter_mappings` | `JSONField` | Maps template variable positions to field names, e.g. `{"1": "name", "2": "order_id"}`. |
+| `status` | `CharField(20)` | See campaign statuses below. |
+| `scheduled_at` | `DateTimeField` | When the campaign is scheduled to run (nullable). |
+| `started_at` | `DateTimeField` | When `run_campaign()` began processing (nullable). |
+| `completed_at` | `DateTimeField` | When `run_campaign()` finished (nullable). |
+| `total_count` | `PositiveIntegerField` | Total number of resolved recipients. |
+| `sent_count` | `PositiveIntegerField` | Successfully sent count. |
+| `delivered_count` | `PositiveIntegerField` | Delivered count (updated from webhooks). |
+| `read_count` | `PositiveIntegerField` | Read count (updated from webhooks). |
+| `failed_count` | `PositiveIntegerField` | Failed send count. |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+| `updated_at` | `DateTimeField` | Auto-set on every save. |
+
+### Campaign Statuses
+
+| Value | Meaning |
+|---|---|
+| `draft` | Not yet started. |
+| `scheduled` | Queued to run at `scheduled_at`. |
+| `running` | Currently sending. |
+| `completed` | All sends attempted. |
+| `failed` | Campaign encountered a fatal error. |
+| `paused` | Manually paused mid-send. |
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppCampaign
+from django_meta_whatsapp.utils import run_campaign_async
+
+campaign = WhatsAppCampaign.objects.create(
+    account=account,
+    name="Summer Sale",
+    template=template,
+    audience_type="contacts",
+    parameter_mappings={"1": "name"},
+)
+run_campaign_async(campaign.id)
+```
+
+---
+
+## WhatsAppCampaignRecipient
+
+One row per recipient per campaign execution — tracks the per-message outcome.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `campaign` | `ForeignKey(WhatsAppCampaign)` | Parent campaign. |
+| `phone_number` | `CharField(30)` | Recipient phone number. |
+| `name` | `CharField(255)` | Recipient name. |
+| `parameters` | `JSONField` | Resolved template variables for this recipient. |
+| `status` | `CharField(20)` | `"pending"`, `"sent"`, `"delivered"`, `"read"`, or `"failed"`. |
+| `message_id` | `CharField(255)` | Meta WAMID returned on send (nullable). |
+| `error_message` | `TextField` | Error detail if status is `"failed"`. |
+| `sent_at` | `DateTimeField` | Timestamp when the message was sent (nullable). |
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppCampaignRecipient
+
+failed = WhatsAppCampaignRecipient.objects.filter(
+    campaign=campaign,
+    status="failed",
+)
+for r in failed:
+    print(r.phone_number, r.error_message)
+```
+
+---
+
+## WhatsAppLabel
+
+A tag or label for organizing contacts and conversations.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `CharField(50)` | Label name, unique. |
+| `color` | `CharField(20)` | Tailwind color name (e.g. `"amber"`) or hex code. Default `"gray"`. |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+
+**Default ordering:** `name` (alphabetical).
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppLabel
+
+vip_label, _ = WhatsAppLabel.objects.get_or_create(
+    name="VIP",
+    defaults={"color": "amber"},
+)
+contact.labels.add(vip_label)
+```
+
+---
+
+## WhatsAppSignup
+
+An In-App Signup deep link (`wa.me/<phone>/signup/<id>`) that lets users subscribe to your business directly inside WhatsApp.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey(WhatsAppAccount)` | Owning account. |
+| `signup_id` | `CharField(100)` | ID returned by Meta after creation (unique). |
+| `display_name` | `CharField(255)` | Internal label — not shown to subscribers. |
+| `signup_message` | `TextField` | Pre-consent screen text shown to the user in WhatsApp. |
+| `confirmation_message` | `TextField` | Sent to the user after they subscribe. Use `{{promo_code}}` to embed a promo. |
+| `privacy_policy_url` | `URLField` | URL to privacy policy. **Immutable** after creation on Meta. |
+| `website_url` | `URLField` | Optional website URL. |
+| `promo_code` | `CharField(100)` | Alphanumeric promo code. Replaces `{{promo_code}}` in confirmation message. |
+| `status` | `CharField(20)` | `"ACTIVE"` or `"DISABLED"`. |
+| `auto_add_to_label` | `ForeignKey(WhatsAppLabel)` | Automatically assign this label to new subscribers (nullable). |
+| `subscriber_count` | `PositiveIntegerField` | Running count of subscribers (updated from webhook). |
+| `tos_accepted` | `BooleanField` | `True` after Terms of Service are accepted on first creation. |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+| `updated_at` | `DateTimeField` | Auto-set on every save. |
+
+**Default ordering:** `-created_at`
+
+### Methods
+
+#### `get_deep_link(phone_number: str) -> str`
+
+Builds the shareable `wa.me` deep link for a given phone number.
+
+```python
+signup = WhatsAppSignup.objects.get(signup_id="abc123")
+link = signup.get_deep_link("+919876543210")
+# "https://wa.me/919876543210/signup/abc123"
+```
+
+---
+
+## WhatsAppAPIKey
+
+REST API authentication keys used by the built-in API layer.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `CharField(255)` | Human-readable key name (e.g. `"Mobile App"`). |
+| `key` | `CharField(64)` | UUID-based key value, unique. Auto-generated on creation. |
+| `is_active` | `BooleanField` | `True` if the key is active. |
+| `created_at` | `DateTimeField` | Auto-set on creation. |
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppAPIKey
+
+api_key = WhatsAppAPIKey.objects.create(name="Mobile App")
+print(api_key.key)  # e.g. "550e8400-e29b-41d4-a716-446655440000"
+```
+
+---
+
+## WhatsAppMedia
+
+A reusable media library. Files are uploaded to Meta once, and the resulting `media_id` can be reused in multiple `send_media_message()` calls.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey(WhatsAppAccount)` | Owning account (nullable). |
+| `file` | `FileField` | The local file (`whatsapp_media_library/`). |
+| `media_id` | `CharField(255)` | ID returned by Meta after upload. |
+| `media_type` | `CharField(20)` | `"image"`, `"video"`, `"audio"`, or `"document"`. |
+| `mime_type` | `CharField(100)` | MIME type string. |
+| `original_filename` | `CharField(255)` | Original filename as uploaded. |
+| `uploaded_at` | `DateTimeField` | Auto-set on creation. |
+
+---
+
+## WhatsAppCatalogProduct
+
+Local mirror of Meta Commerce catalog products. Populated by `sync_catalog_products()`.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey(WhatsAppAccount)` | Owning account (nullable). |
+| `catalog_id` | `CharField(255)` | Meta Commerce catalog ID. |
+| `retailer_id` | `CharField(255)` | Product retailer ID within the catalog. |
+| `name` | `CharField(255)` | Product name. |
+| `price` | `CharField(100)` | Price string including currency, e.g. `"99.99 USD"`. |
+| `image_url` | `URLField` | Product image URL. |
+| `is_active` | `BooleanField` | `True` if the product is active in the catalog. |
+| `synced_at` | `DateTimeField` | Auto-updated on every sync. |
+
+**Unique constraint:** `(account, catalog_id, retailer_id)`
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppCatalogProduct
+
+products = WhatsAppCatalogProduct.objects.filter(
+    catalog_id="123456789",
+    is_active=True,
+)
+```
+
+---
+
+## WhatsAppBlockedUser
+
+Local mirror of Meta's block list. `is_active=True` means the user is currently blocked. Unblocked users are retained for audit history with `is_active=False`.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `account` | `ForeignKey(WhatsAppAccount)` | Owning account. |
+| `phone_number` | `CharField(30)` | Blocked phone number (e.g. `"+919876543210"`). |
+| `wa_id` | `CharField(50)` | Meta's `wa_id` (may differ from `phone_number`). |
+| `blocked_at` | `DateTimeField` | Auto-set when the record is created. |
+| `blocked_by` | `CharField(255)` | Username or email of the agent who triggered the block. |
+| `reason` | `TextField` | Internal note (e.g. `"spam"`, `"abuse"`). |
+| `is_active` | `BooleanField` | `True` = currently blocked; `False` = unblocked (kept for history). |
+| `unblocked_at` | `DateTimeField` | Timestamp when the user was unblocked (nullable). |
+| `unblocked_by` | `CharField(255)` | Username or email of the agent who unblocked. |
+| `meta_error` | `TextField` | Stores error detail if the Meta block API call failed. |
+
+**Unique constraint:** `(account, phone_number)`
+
+**Default ordering:** `-blocked_at`
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppBlockedUser
+
+currently_blocked = WhatsAppBlockedUser.objects.filter(
+    account=account,
+    is_active=True,
+)
+```
+
+---
+
+## WhatsAppWebhookLog
+
+Full log of every webhook payload received from Meta. Useful for debugging delivery issues and replaying events.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `received_at` | `DateTimeField` | Auto-set when the webhook is received. |
+| `payload` | `JSONField` | Full webhook request body as parsed JSON. |
+| `processed` | `BooleanField` | `True` if the webhook was processed without error. |
+| `error` | `TextField` | Error text if processing failed. |
+
+**Default ordering:** `-received_at`
+
+### Example
+
+```python
+from django_meta_whatsapp.models import WhatsAppWebhookLog
+
+# Find unprocessed webhooks with errors
+failed_webhooks = WhatsAppWebhookLog.objects.filter(
+    processed=False,
+).exclude(error="")
+
+for log in failed_webhooks:
+    print(log.received_at, log.error)
+    print(log.payload)  # full Meta webhook JSON
+```

@@ -1,0 +1,135 @@
+---
+title: "WhatsApp Marketing Campaigns — Bulk Template Messaging"
+sidebarTitle: "Campaigns"
+description: "Create, schedule, and execute bulk WhatsApp campaigns using approved templates, with real-time delivery, read, and failure analytics."
+---
+
+Campaigns let you send a WhatsApp template message to a large audience at once. Each campaign targets a defined audience (contacts, CSV upload, or a custom queryset), maps template variables to audience fields, and tracks delivery, read, and failure counts in real time.
+
+## WhatsAppCampaign model fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `account` | `FK → WhatsAppAccount` | The WhatsApp account used to send this campaign |
+| `name` | `CharField` | Human-readable campaign name |
+| `template` | `FK → WhatsAppTemplate` | The approved template to send (must have `status="APPROVED"`) |
+| `audience_type` | `CharField` | `"contacts"`, `"csv"`, or a named key from `WHATSAPP["AUDIENCES"]` in settings |
+| `audience_filters` | `JSONField` | Extra ORM filter kwargs applied when `audience_type="contacts"`, e.g. `{"labels__name": "vip"}` |
+| `csv_file` | `FileField` | Uploaded CSV when `audience_type="csv"` |
+| `parameter_mappings` | `JSONField` | Maps template variable index to a field name, e.g. `{"1": "name", "2": "order_id"}` |
+| `status` | `CharField` | `draft`, `scheduled`, `running`, `completed`, `failed`, or `paused` |
+| `scheduled_at` | `DateTimeField` | Optional future datetime for a scheduled send |
+| `total_count` | `PositiveIntegerField` | Total audience size resolved at run time |
+| `sent_count` | `PositiveIntegerField` | Messages accepted by Meta |
+| `delivered_count` | `PositiveIntegerField` | Delivery confirmations received via webhook |
+| `read_count` | `PositiveIntegerField` | Read receipts received via webhook |
+| `failed_count` | `PositiveIntegerField` | Messages rejected by Meta or that errored |
+
+## Creating a campaign
+
+1. Go to `/whatsapp/campaigns/add/`
+2. **Select a template** — only `APPROVED` templates appear (or all templates if none are approved yet)
+3. **Choose an audience type** — `contacts`, `csv`, or a named audience key from `WHATSAPP["AUDIENCES"]`
+4. **Set parameter mappings** — if your template contains `{{1}}`, `{{2}}` variables, map each index to a field on the audience object (e.g. `{"1": "name"}`)
+5. **Optionally schedule** — leave `scheduled_at` blank to send immediately
+6. Save the campaign, then click **Run** to execute
+
+## Audience types
+
+### `contacts` — WhatsAppContact records
+
+Queries all `WhatsAppContact` objects with `opted_out=False` and `is_blocked=False`. Apply additional ORM filters via `audience_filters`:
+
+```json
+{"labels__name": "newsletter"}
+```
+
+This resolves each contact's `normalized_phone` and `display_name` for the send.
+
+### `csv` — Uploaded file
+
+Upload a CSV with at minimum a `phone` column. Any additional columns (e.g. `name`, `order_id`) are available for `parameter_mappings`.
+
+```csv
+phone,name,order_id
+919876543210,Rahul Baberwal,ORD-999
+911234567890,Priya Sharma,ORD-1001
+```
+
+10-digit numbers without a country code are automatically prefixed with `91` (India).
+
+### Named audiences — custom querysets
+
+Register a callable in `settings.py` that returns a queryset or list:
+
+```python
+# settings.py
+WHATSAPP = {
+    "AUDIENCES": {
+        "premium_users": "myapp.audiences.get_premium_users",
+    }
+}
+```
+
+```python
+# myapp/audiences.py
+from myapp.models import User
+
+def get_premium_users():
+    return User.objects.filter(plan="premium", is_active=True)
+```
+
+The `PHONE_FIELD` (default `"phone"`) and `NAME_FIELD` (default `"name"`) settings control which attributes are read from each object.
+
+## Running a campaign programmatically
+
+```python
+from django_meta_whatsapp.utils import run_campaign, run_campaign_async
+
+# Synchronous (blocks until complete — suitable for small audiences)
+result = run_campaign(campaign_id=5)
+print(f"Sent: {result['sent']}, Failed: {result['failed']}")
+
+# Async via Celery (requires WHATSAPP_USE_CELERY = True)
+result = run_campaign_async(campaign_id=5)
+if result.get("queued"):
+    print("Campaign queued for background execution")
+```
+
+`run_campaign_async` automatically falls back to synchronous execution if Celery is not configured, so it is safe to call in all environments.
+
+## Campaign analytics
+
+Each campaign's detail page at `/whatsapp/campaigns/<pk>/` shows a live breakdown of:
+
+- **Total** — audience size at the time the campaign was run
+- **Sent** — accepted by Meta
+- **Delivered** — delivery confirmed by Meta webhook
+- **Read** — opened by the recipient
+- **Failed** — rejected by Meta or errored during send
+
+The analytics dashboard at `/whatsapp/analytics/` aggregates `sent_count`, `delivered_count`, `read_count`, and `failed_count` across all completed campaigns.
+
+## WhatsAppCampaignRecipient model
+
+Every contact in the audience gets a `WhatsAppCampaignRecipient` row that tracks the per-recipient outcome:
+
+| Field | Description |
+|-------|-------------|
+| `phone_number` | Recipient phone number |
+| `name` | Resolved display name |
+| `parameters` | The template variable values used for this recipient |
+| `status` | `pending`, `sent`, `delivered`, `read`, or `failed` |
+| `message_id` | Meta message ID (`wamid.*`) returned on a successful send |
+| `error_message` | Error detail from Meta if the send failed |
+| `sent_at` | Timestamp of the successful API call |
+
+The first 100 recipients are shown in the campaign detail view, ordered by `sent_at` descending.
+
+<Tip>
+For large campaigns (thousands of contacts), enable Celery with `WHATSAPP_USE_CELERY = True` in settings. Without Celery, campaigns run synchronously in the web process and will time out for large audiences. See the [Celery integration guide](/integrations/celery) for setup instructions.
+</Tip>
+
+<Warning>
+Only templates with `status="APPROVED"` can be used in campaigns. Sending to contacts with `is_blocked=True` or `opted_out=True` is automatically skipped by the audience resolver.
+</Warning>

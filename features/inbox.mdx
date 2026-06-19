@@ -1,0 +1,119 @@
+---
+title: "Live WhatsApp Inbox — Real-Time Chat Interface"
+sidebarTitle: "Inbox"
+description: "The unified inbox lets you read and reply to WhatsApp messages in real time, with media support, reply threading, and per-conversation labels."
+---
+
+The inbox is the live chat interface at `/whatsapp/inbox/`. It shows all conversations across your WhatsApp account, lets you reply with text, images, videos, audio, and documents, and supports reply threading and per-conversation labels. Inbound messages arrive automatically via the webhook and appear instantly — no page refresh required.
+
+## Navigating the inbox
+
+| URL | Purpose |
+|-----|---------|
+| `/whatsapp/inbox/` | List of all conversations, ordered by most-recent message |
+| `/whatsapp/inbox/<phone_number>/` | Open the chat thread for a specific contact |
+
+**Search and filter** — use GET query params to narrow the conversation list:
+
+- `?q=<phone_or_name>` — full-text search across phone number and contact name
+- `?label=<label_name>` — filter conversations that carry a specific label
+
+Both params are handled by `InboxView` and can be combined:
+
+```
+/whatsapp/inbox/?q=rahul&label=vip
+```
+
+## Sending messages
+
+`SendMessageView` handles POST requests to `/whatsapp/inbox/<phone_number>/send/` and automatically detects the message type from the submitted form fields. You can also call the underlying utility functions directly from Python:
+
+```python
+from django_meta_whatsapp.utils import send_text_message, send_location_message
+
+# Send a plain text message
+send_text_message("919876543210", "Hello!")
+
+# Send a location pin
+send_location_message(
+    "919876543210",
+    latitude=28.6139,
+    longitude=77.2090,
+    name="New Delhi Office",
+    address="Connaught Place, New Delhi"
+)
+```
+
+The `send_text_message` and `send_location_message` functions both accept an optional `account` keyword argument. When omitted, credentials are read from `WHATSAPP['ACCESS_TOKEN']` and `WHATSAPP['PHONE_NUMBER_ID']` in Django settings.
+
+## Reply threading
+
+Any message can be sent as a threaded reply to an earlier message. Pass the Meta message ID (`wamid.*`) of the message being replied to via the `reply_to_id` POST parameter in the form, or via the `reply_message_id` argument in Python:
+
+```python
+from django_meta_whatsapp.utils import send_text_message
+
+send_text_message(
+    "919876543210",
+    "Got it, processing your order!",
+    reply_message_id="wamid.ABC123"
+)
+```
+
+The reply reference is stored on the `WhatsAppMessage.reply_to` FK and rendered as a quoted message bubble in the UI.
+
+## Conversation labels
+
+Each conversation can carry a single label for triage and organisation. Labels are colour-coded and created at `/whatsapp/labels/`.
+
+To change a conversation's label, the UI sends an AJAX POST to:
+
+```
+POST /whatsapp/inbox/<conv_pk>/label/
+```
+
+`UpdateConversationLabelView` handles this request and returns `{"status": "ok"}`. Send an empty `label` field to remove the label.
+
+Labels have a `name` (unique) and a `color` — either a Tailwind preset name or a hex code. See the [Contacts page](/features/contacts) for the full list of preset colors.
+
+## Message types supported
+
+`WhatsAppMessage.TYPE_CHOICES` defines every message type the inbox can store and display:
+
+| Type | Description |
+|------|-------------|
+| `text` | Plain text message |
+| `image` | JPEG, PNG, or WebP image |
+| `video` | MP4 video |
+| `audio` | OGG Opus or MP3 voice note |
+| `document` | PDF, DOCX, XLSX, and other documents |
+| `location` | Latitude/longitude pin with optional name and address |
+| `template` | An approved WhatsApp template message |
+| `reaction` | Emoji reaction to a message |
+| `sticker` | Static or animated WhatsApp sticker |
+| `interactive` | Button list or product message |
+| `button` | Reply from a quick-reply button |
+
+## Media uploads
+
+Upload a file to Meta's media hosting first, then reference the returned `media_id` when sending. The `upload_media` helper handles the multipart upload and normalises MIME types (e.g. it corrects `.m4a` → `audio/mp4` for Meta compatibility):
+
+```python
+from django_meta_whatsapp.utils import upload_media, send_media_message
+
+with open("invoice.pdf", "rb") as f:
+    media_id = upload_media(f, "application/pdf")
+    send_media_message(
+        "919876543210",
+        media_id=media_id,
+        media_type="document",
+        filename="invoice.pdf",
+        caption="Your invoice is attached."
+    )
+```
+
+`send_media_message` supports `media_type` values of `image`, `video`, `audio`, and `document`. Captions are supported for `image`, `video`, and `document` types. The `filename` argument is only used for `document`.
+
+## Webhook integration
+
+Inbound messages are automatically ingested via the webhook endpoint at `/whatsapp/webhook/` and saved as `WhatsAppMessage` objects with `direction="inbound"`. The inbox UI reflects new messages immediately. See the [Webhooks](/integrations/webhooks) page for setup instructions.

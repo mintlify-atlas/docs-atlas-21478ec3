@@ -1,0 +1,178 @@
+---
+title: "Signals Reference — django-meta-whatsapp Events"
+sidebarTitle: "Signals"
+description: "Reference for the four Django signals emitted by django-meta-whatsapp: whatsapp_message_received, whatsapp_message_sent, whatsapp_campaign_completed, whatsapp_user_subscribed."
+---
+
+django-meta-whatsapp emits four Django signals. Connect to them in your app's `AppConfig.ready()` to hook into WhatsApp events. All signals are importable from `django_meta_whatsapp.signals`.
+
+## Import
+
+```python
+from django_meta_whatsapp.signals import (
+    whatsapp_message_received,
+    whatsapp_message_sent,
+    whatsapp_campaign_completed,
+    whatsapp_user_subscribed,
+)
+```
+
+---
+
+## `whatsapp_message_received`
+
+**Fired by:** `WebhookView` when an inbound message is ingested and saved.
+
+**kwargs:**
+
+| Name | Type | Description |
+|---|---|---|
+| `message` | `WhatsAppMessage` | The newly created inbound message instance. |
+
+```python
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_message_received
+
+@receiver(whatsapp_message_received)
+def on_message_received(sender, message, **kwargs):
+    # message.phone_number  — who sent it
+    # message.message_body  — text content (if text message)
+    # message.message_type  — "text", "image", "document", etc.
+    # message.direction     — always "inbound" here
+    print(f"New message from {message.phone_number}: {message.message_body}")
+```
+
+---
+
+## `whatsapp_message_sent`
+
+**Fired by:** `WebhookView` when an outbound message status update (`sent`) arrives via webhook.
+
+**kwargs:**
+
+| Name | Type | Description |
+|---|---|---|
+| `message` | `WhatsAppMessage` | The outbound message instance whose status has just been updated to `"sent"`. |
+
+```python
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_message_sent
+
+@receiver(whatsapp_message_sent)
+def on_message_sent(sender, message, **kwargs):
+    # message.direction == "outbound"
+    # message.status    == "sent"
+    print(f"Message {message.message_id} sent to {message.phone_number}")
+```
+
+---
+
+## `whatsapp_campaign_completed`
+
+**Fired by:** `run_campaign()` once all sends have been attempted for a campaign.
+
+**kwargs:**
+
+| Name | Type | Description |
+|---|---|---|
+| `campaign` | `WhatsAppCampaign` | The completed campaign instance. `campaign.status` is `"completed"` at this point. |
+| `sent` | `int` | Number of messages successfully sent. |
+| `failed` | `int` | Number of messages that failed to send. |
+
+```python
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_campaign_completed
+
+@receiver(whatsapp_campaign_completed)
+def on_campaign_done(sender, campaign, sent, failed, **kwargs):
+    # campaign.name          — campaign name
+    # campaign.status        — "completed"
+    # sent + failed == campaign.total_count
+    print(
+        f"Campaign '{campaign.name}' finished: "
+        f"{sent} sent, {failed} failed out of {campaign.total_count} total."
+    )
+```
+
+---
+
+## `whatsapp_user_subscribed`
+
+**Fired by:** `WebhookView` when a user subscribes through an In-App Signup link.
+
+**kwargs:**
+
+| Name | Type | Description |
+|---|---|---|
+| `contact` | `WhatsAppContact` | The contact record for the new subscriber (created or updated). |
+| `signup` | `WhatsAppSignup` | The signup link the user subscribed through. |
+
+```python
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import whatsapp_user_subscribed
+
+@receiver(whatsapp_user_subscribed)
+def on_user_subscribed(sender, contact, signup, **kwargs):
+    # contact.phone         — subscriber's phone number
+    # contact.name          — subscriber's name (if available)
+    # signup.display_name   — internal label for the signup link
+    # signup.promo_code     — promo code attached to the link (if any)
+    print(
+        f"{contact.phone} subscribed via '{signup.display_name}' "
+        f"(promo: {signup.promo_code or 'none'})"
+    )
+```
+
+---
+
+## Connecting Receivers
+
+The recommended pattern is to define all receiver functions in a `handlers.py` (or `signals.py`) module inside your app, then import it inside `AppConfig.ready()` to ensure the decorators are registered at startup.
+
+```python myapp/apps.py
+from django.apps import AppConfig
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        import myapp.handlers  # noqa — triggers @receiver decorators
+```
+
+```python myapp/handlers.py
+from django.dispatch import receiver
+from django_meta_whatsapp.signals import (
+    whatsapp_message_received,
+    whatsapp_campaign_completed,
+    whatsapp_user_subscribed,
+)
+
+@receiver(whatsapp_message_received)
+def handle_inbound(sender, message, **kwargs):
+    # Auto-reply to any inbound text message
+    if message.message_type == "text":
+        from django_meta_whatsapp.utils import send_text_message
+        send_text_message(
+            message.phone_number,
+            "Thanks for your message! We'll get back to you shortly.",
+            reply_message_id=message.message_id,
+        )
+
+@receiver(whatsapp_campaign_completed)
+def notify_on_campaign_complete(sender, campaign, sent, failed, **kwargs):
+    # Send an internal Slack/email notification, log to analytics, etc.
+    pass
+
+@receiver(whatsapp_user_subscribed)
+def welcome_new_subscriber(sender, contact, signup, **kwargs):
+    from django_meta_whatsapp.utils import send_template_message
+    send_template_message(
+        contact.phone,
+        "welcome_message",
+        language_code="en",
+    )
+```
+
+<Note>
+Signal handlers run **synchronously** inside the webhook request/response cycle. Keep receivers fast — avoid database-heavy queries, external HTTP calls, or file I/O directly inside a handler. Use Celery tasks (triggered from the handler) for any heavy processing.
+</Note>

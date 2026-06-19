@@ -1,0 +1,137 @@
+---
+title: "Async Campaign Execution with Celery"
+sidebarTitle: "Celery"
+description: "Enable Celery to run large WhatsApp campaigns asynchronously in the background, preventing web request timeouts for bulk sends."
+---
+
+By default, campaigns run synchronously in the web process. For large audiences (hundreds or thousands of contacts), this causes web request timeouts and a poor user experience. Enable the optional Celery integration to queue campaigns as background tasks.
+
+## Installation
+
+The Celery integration is an optional dependency group. Install it with the `celery` extras:
+
+```bash
+# Install with Celery extras
+pip install django-meta-whatsapp[celery]
+
+# Or add individually
+pip install django-meta-whatsapp celery django-celery-beat
+```
+
+The `[celery]` extra pulls in `celery>=5.0` and `django-celery-beat>=2.0`.
+
+## Configuration
+
+```python settings.py
+# Enable async campaign execution
+WHATSAPP_USE_CELERY = True
+
+# Standard Celery settings
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+
+INSTALLED_APPS = [
+    # ...
+    "django_meta_whatsapp",
+    "django_celery_beat",  # for periodic / scheduled tasks
+]
+```
+
+You will also need a `celery.py` application file in your Django project root if you don't already have one:
+
+```python myproject/celery.py
+import os
+from celery import Celery
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "myproject.settings")
+
+app = Celery("myproject")
+app.config_from_object("django.conf:settings", namespace="CELERY")
+app.autodiscover_tasks()
+```
+
+## How It Works
+
+When `WHATSAPP_USE_CELERY = True`, calling `run_campaign_async()` queues the `run_campaign_task` Celery task instead of executing inline. The task is defined as a bound task with automatic retries:
+
+```python django_meta_whatsapp/tasks.py
+# Actual task definition from source
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def run_campaign_task(self, campaign_id: int, account_id=None):
+    ...
+```
+
+- **`max_retries=3`** — the task will be retried up to 3 times on failure
+- **`default_retry_delay=60`** — 60-second delay between retry attempts
+- On each retry, the original exception is re-raised via `self.retry(exc=exc)`
+
+You can invoke the task directly or via `run_campaign_async()`:
+
+```python
+from django_meta_whatsapp.tasks import run_campaign_task
+
+# Queue directly by campaign ID and account ID
+run_campaign_task.delay(campaign_id=5, account_id=1)
+```
+
+<Tip>
+  Use `run_campaign_async()` from `django_meta_whatsapp.utils` in all your application code — it automatically uses Celery when available and falls back to synchronous execution when not. This makes your code environment-agnostic and easy to test locally without a broker.
+</Tip>
+
+## Fallback Behavior
+
+If Celery is not installed or `WHATSAPP_USE_CELERY` is `False` (or not set), `run_campaign_async()` falls back to synchronous execution automatically — no code changes required. The `tasks.py` module guards the import with a `try/except ImportError` so the package never hard-requires Celery:
+
+```python
+try:
+    from celery import shared_task
+    # task defined here
+except ImportError:
+    pass  # Celery not installed; tasks unavailable
+```
+
+## Scheduled Campaigns
+
+Campaigns with a `scheduled_at` datetime set can be picked up by a periodic Celery Beat task that polls for campaigns due for execution. Add an entry to `CELERY_BEAT_SCHEDULE` and create a small dispatch task in your app:
+
+```python settings.py
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "run-scheduled-campaigns": {
+        "task": "myapp.tasks.dispatch_scheduled_campaigns",
+        "schedule": crontab(minute="*/5"),  # every 5 minutes
+    },
+}
+```
+
+```python myapp/tasks.py
+from celery import shared_task
+from django.utils import timezone
+from django_meta_whatsapp.models import WhatsAppCampaign
+from django_meta_whatsapp.utils import run_campaign_async
+
+@shared_task
+def dispatch_scheduled_campaigns():
+    now = timezone.now()
+    due = WhatsAppCampaign.objects.filter(
+        status="scheduled",
+        scheduled_at__lte=now
+    )
+    for campaign in due:
+        run_campaign_async(campaign.pk, account_id=campaign.account_id)
+```
+
+This task queries for any campaign with `status="scheduled"` whose `scheduled_at` has passed, then queues each one via `run_campaign_async()`.
+
+## Starting the Worker
+
+After configuration, start your Celery worker and Beat scheduler:
+
+```bash
+# Worker (processes tasks)
+celery -A myproject worker --loglevel=info
+
+# Beat scheduler (enqueues periodic tasks)
+celery -A myproject beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+```

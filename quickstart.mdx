@@ -1,47 +1,138 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with django-meta-whatsapp"
+sidebarTitle: "Quickstart"
+description: "Install django-meta-whatsapp and send your first WhatsApp message from Django in under 5 minutes using Meta's Cloud API."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+By the end of this guide you'll have `django-meta-whatsapp` installed, wired up to your Django project, and ready to receive and send WhatsApp messages through the Meta Cloud API v22.0. The whole process takes less than 5 minutes.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
+  <Step title="Install the package">
+    Install `django-meta-whatsapp` from PyPI using your preferred package manager.
+
+    <CodeGroup>
+      ```bash pip
+      pip install django-meta-whatsapp
+      ```
+
+      ```bash uv
+      uv add django-meta-whatsapp
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Add to INSTALLED_APPS">
+    Add `django_meta_whatsapp` to your `INSTALLED_APPS` list in `settings.py`.
+
+    ```python settings.py
+    INSTALLED_APPS = [
+        # ... your existing apps ...
+        "django_meta_whatsapp",
+    ]
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Mount URLs">
+    Include the package URLs in your project's root `urls.py`. The `namespace` argument is required.
+
+    ```python urls.py
+    from django.urls import path, include
+
+    urlpatterns = [
+        # ... your existing URL patterns ...
+        path("whatsapp/", include("django_meta_whatsapp.urls", namespace="django_meta_whatsapp")),
+    ]
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Configure credentials">
+    Add the `WHATSAPP` settings dict to `settings.py`. At minimum you need your Meta access token, the phone number ID, and a webhook verification token.
+
+    ```python settings.py
+    WHATSAPP = {
+        "ACCESS_TOKEN": "EAA...",               # Meta system-user permanent access token
+        "PHONE_NUMBER_ID": "1234567890",         # From the Meta developer dashboard
+        "WEBHOOK_VERIFY_TOKEN": "your_secure_random_string",
+    }
+    ```
+
+    <Note>
+      **`ACCESS_TOKEN`** is the permanent (system-user) access token generated in the Meta Business Suite — **not** a short-lived user token. **`WEBHOOK_VERIFY_TOKEN`** is any secure random string you choose; Meta will send it back on webhook verification so your endpoint can confirm the request is genuine.
+    </Note>
+  </Step>
+
+  <Step title="Run migrations">
+    Apply the package's database migrations. A single clean migration (`0001_initial`) creates all required tables.
 
     ```bash
-    your-cli start
+    python manage.py migrate
     ```
   </Step>
+
+  <Step title="Open the dashboard">
+    Start your development server and navigate to the dashboard:
+
+    ```bash
+    python manage.py runserver
+    ```
+
+    1. Visit **`http://127.0.0.1:8000/whatsapp/`** in your browser.
+    2. If no WhatsApp Account exists yet, the UI will prompt you to add one under **Settings → Accounts**.
+    3. In your **Meta App dashboard**, set the webhook URL to:
+       ```
+       https://yourdomain.com/whatsapp/webhook/
+       ```
+       Use your `WEBHOOK_VERIFY_TOKEN` as the verification token when prompted by Meta.
+    4. Head to the **Templates** tab and click **Sync from Meta** to import your approved message templates.
+    5. Open the **Inbox** — you're live!
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+---
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+## Send your first message
+
+Once configured, you can send a WhatsApp text message from anywhere in your Django codebase using the `send_text_message` utility:
+
+```python
+from django_meta_whatsapp.utils import send_text_message
+
+send_text_message("919876543210", "Hello from django-meta-whatsapp!")
+```
+
+The phone number should include the country code (e.g. `91` for India). The function normalises formatting automatically — leading `+` signs, spaces, and dashes are all stripped.
+
+<Tip>
+  In a production multi-account setup, pass a `WhatsAppAccount` model instance as the `account` keyword argument instead of relying on global settings. This lets you route messages through the correct Business Account:
+
+  ```python
+  from django_meta_whatsapp.models import WhatsAppAccount
+  from django_meta_whatsapp.utils import send_text_message
+
+  account = WhatsAppAccount.objects.get(name="My Brand")
+  send_text_message("919876543210", "Hello!", account=account)
+  ```
+
+  Accounts are managed through the dashboard UI at `/whatsapp/settings/accounts/`. See [Multi-Account Support](/advanced/multi-account) for details.
 </Tip>
+
+---
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Explore every option in the `WHATSAPP` settings dict — UI customisation, audience providers, Celery, and more.
+  </Card>
+  <Card title="Inbox" icon="inbox" href="/features/inbox">
+    Learn how the live unified inbox works, including reply threading and media handling.
+  </Card>
+  <Card title="Campaigns" icon="bullhorn" href="/features/campaigns">
+    Set up bulk marketing campaigns with approved templates and audience targeting.
+  </Card>
+  <Card title="REST API" icon="code" href="/api/authentication">
+    Authenticate with API keys and integrate WhatsApp messaging into external services.
+  </Card>
+</CardGroup>

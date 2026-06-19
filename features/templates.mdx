@@ -1,0 +1,115 @@
+---
+title: "WhatsApp Message Templates — Sync, Create, and Send"
+sidebarTitle: "Templates"
+description: "Manage your Meta-approved WhatsApp message templates: sync from Meta, create new ones in the dashboard, and push them to Meta for approval."
+---
+
+WhatsApp requires pre-approved message templates for outbound marketing and utility messages. django-meta-whatsapp lets you sync approved templates from Meta, create new templates in the dashboard, and push them to Meta for review — all without leaving your Django project.
+
+## WhatsAppTemplate model fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `account` | `FK → WhatsAppAccount` | The WhatsApp account this template belongs to |
+| `name` | `CharField` | Template name — must match Meta's naming rules: lowercase letters, numbers, and underscores only |
+| `meta_template_id` | `CharField` | The ID returned by Meta after the template is created |
+| `language` | `CharField` | BCP-47 language code, default `"en"` |
+| `category` | `CharField` | `MARKETING`, `UTILITY`, or `AUTHENTICATION` |
+| `status` | `CharField` | `APPROVED`, `PENDING`, `REJECTED`, or `DRAFT` |
+| `header` | `JSONField` | Optional header component: `{"type": "TEXT"\|"IMAGE"\|"VIDEO"\|"DOCUMENT", "text": "..."}` |
+| `body_text` | `TextField` | Template body text. Use `{{1}}`, `{{2}}` … for variables |
+| `footer_text` | `CharField` | Optional footer line below the body |
+| `buttons` | `JSONField` | Optional list of buttons: `[{"type": "QUICK_REPLY", "text": "Yes"}]` |
+
+## Syncing templates from Meta
+
+Pull all approved and pending templates from your WhatsApp Business Account into the local database.
+
+**Via the dashboard:** navigate to `/whatsapp/templates/` and click the **Sync from Meta** button. This calls `TemplateSyncFromMetaView`, which requires `WABA_ID` to be configured on the active account or in `WHATSAPP['WABA_ID']` in settings.
+
+**Via Python:**
+
+```python
+from django_meta_whatsapp.utils import sync_templates_from_meta
+from django_meta_whatsapp.models import WhatsAppAccount
+
+account = WhatsAppAccount.objects.get(pk=1)
+templates = sync_templates_from_meta(account=account)
+print(f"Synced {len(templates)} templates")
+```
+
+`sync_templates_from_meta` returns the raw list of template dicts from Meta's Graph API. The dashboard view then calls `WhatsAppTemplate.objects.update_or_create(...)` for each one.
+
+**Via management command:**
+
+```bash
+python manage.py wa_sync_templates
+# or target a specific account:
+python manage.py wa_sync_templates --account-id 1
+```
+
+## Creating a template
+
+Build a new template locally at `/whatsapp/templates/add/`. After saving, the template has `status="DRAFT"` and exists only in your database. Click **Push to Meta** on the template detail page to submit it for review.
+
+**Pushing to Meta via Python:**
+
+```python
+from django_meta_whatsapp.utils import push_template_to_meta
+from django_meta_whatsapp.models import WhatsAppTemplate
+
+template = WhatsAppTemplate.objects.get(name="order_update")
+push_template_to_meta(template)
+```
+
+`push_template_to_meta` assembles a `components` array from the template's `header`, `body_text`, `footer_text`, and `buttons` fields and POSTs it to `/{waba_id}/message_templates` on the Graph API. After a successful call, Meta sets the template status to `PENDING` until it is reviewed.
+
+## Template variables
+
+Use `{{1}}`, `{{2}}`, … as ordered placeholders in `body_text` (and optionally in `header` when the header type is `TEXT`). At send time, supply values for each placeholder using `build_template_components`:
+
+```python
+from django_meta_whatsapp.utils import build_template_components, send_template_message
+
+components = build_template_components(
+    body_params=["Rahul", "ORD-999"],   # fills {{1}}, {{2}} in body
+    header_params=["Order Update"],      # fills {{1}} in header (if TEXT header)
+)
+
+send_template_message(
+    "919876543210",
+    template_name="order_update",
+    language_code="en",
+    components=components
+)
+```
+
+`build_template_components` also accepts a `buttons` list for dynamic URL or quick-reply payloads:
+
+```python
+build_template_components(
+    body_params=["Rahul"],
+    buttons=[{"index": 0, "sub_type": "url", "payload": "ORD-999"}]
+)
+```
+
+## Template statuses
+
+| Status | Meaning |
+|--------|---------|
+| `APPROVED` | Reviewed and approved by Meta — ready to use in campaigns and direct sends |
+| `PENDING` | Submitted to Meta and awaiting review (typically 24–48 hours) |
+| `REJECTED` | Rejected by Meta — edit and re-submit via Push to Meta |
+| `DRAFT` | Created locally, not yet pushed to Meta |
+
+## Template categories
+
+| Category | Use case |
+|----------|----------|
+| `MARKETING` | Promotional messages, product announcements, offers |
+| `UTILITY` | Transactional messages such as order confirmations, receipts, and shipping updates |
+| `AUTHENTICATION` | One-time passwords and verification codes |
+
+<Warning>
+Only `APPROVED` templates can be used in campaign sends or direct `send_template_message` calls. Sending a non-approved template will result in an error from Meta.
+</Warning>

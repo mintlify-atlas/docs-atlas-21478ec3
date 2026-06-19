@@ -1,0 +1,104 @@
+---
+title: "REST API Authentication — X-API-Key Header"
+sidebarTitle: "Authentication"
+description: "Authenticate django-meta-whatsapp REST API requests using an X-API-Key header. Generate API keys from the dashboard under Settings → API Keys."
+---
+
+All REST API endpoints in django-meta-whatsapp use API key authentication. Pass your key in the `X-API-Key` request header on every call. Keys are generated and managed from the dashboard under **Settings → API Keys** (`/whatsapp/settings/api-keys/`).
+
+## Generating an API Key
+
+1. Open the dashboard at `/whatsapp/`
+2. Navigate to **Settings → API Keys → Add Key**
+3. Enter a descriptive name for the key (e.g. `"Production Backend"`, `"Mobile App"`)
+4. Copy the generated key immediately — it will not be shown again
+
+Each key is backed by the `WhatsAppAPIKey` model with the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `CharField` | Human-readable label for identifying the key |
+| `key` | `CharField(64)` | UUID-based secret, unique, auto-generated on creation |
+| `is_active` | `BooleanField` | Keys can be disabled without deleting, preserving audit history |
+| `created_at` | `DateTimeField` | Timestamp when the key was created |
+
+## Making Authenticated Requests
+
+Include your API key in the `X-API-Key` header on every request:
+
+```bash
+curl -X POST https://yourdomain.com/whatsapp/api/send-message/ \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "919876543210", "message": "Hello!"}'
+```
+
+**Alternative — query parameter:** You can also pass the key as `?api_key=your-key`. This approach is less secure and should only be used for quick local testing, never in production.
+
+```bash
+curl "https://yourdomain.com/whatsapp/api/chats/?api_key=your-api-key"
+```
+
+## API Base URL
+
+All endpoints are mounted under the URL prefix you chose when including the package URLs. Assuming you used:
+
+```python
+# urls.py
+path("whatsapp/", include("django_meta_whatsapp.urls", namespace="django_meta_whatsapp")),
+```
+
+The REST API base is `/whatsapp/api/`. The full list of available REST endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/whatsapp/api/send-message/` | Send a plain text message |
+| `POST` | `/whatsapp/api/send-location/` | Send a location pin |
+| `POST` | `/whatsapp/api/send-template/` | Send an approved template message |
+| `GET` | `/whatsapp/api/chats/` | List recent conversations |
+| `GET` | `/whatsapp/api/campaigns/` | List recent campaigns |
+| `POST` | `/whatsapp/api/block/` | Block a contact |
+| `DELETE` | `/whatsapp/api/unblock/` | Unblock a contact |
+| `GET` | `/whatsapp/api/blocked/` | List all blocked contacts |
+
+## Error Responses
+
+| Status | Meaning |
+|--------|---------|
+| `401` | Missing or invalid API key |
+| `400` | Invalid request body or missing required fields |
+| `200` | Success |
+
+**Example 401 response** (returned when the `X-API-Key` header is absent or the key does not match an active record):
+
+```json
+{"error": "Unauthorized"}
+```
+
+## Security Best Practices
+
+- Store keys in environment variables — never commit them to source code
+- Create separate keys for each application or environment (production, staging, CI)
+- **Disable** unused keys rather than deleting them, so audit logs remain intact
+- Rotate keys immediately if you suspect they have been exposed
+
+<Warning>
+  Treat API keys like passwords. Anyone who holds a valid key can send messages from your WhatsApp Business Account. Rotate compromised keys immediately by disabling the old key and creating a new one in the dashboard.
+</Warning>
+
+## Available Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Messaging API" icon="message" href="/api/messaging">
+    Send text, location, and template messages via HTTP POST.
+  </Card>
+  <Card title="Campaigns API" icon="bullhorn" href="/api/campaigns">
+    List and monitor bulk campaign status and metrics.
+  </Card>
+  <Card title="Blocked Users API" icon="ban" href="/api/blocked-users">
+    Block, unblock, and list blocked WhatsApp contacts.
+  </Card>
+  <Card title="Python Utility Functions" icon="python" href="/api/utils">
+    Call send, campaign, and block helpers directly from Python code.
+  </Card>
+</CardGroup>

@@ -1,0 +1,91 @@
+---
+title: "Multi-Account WhatsApp — Multiple Business Accounts in Django"
+sidebarTitle: "Multi-Account"
+description: "Run multiple WhatsApp Business Accounts from a single Django project, with per-account inboxes, campaigns, templates, and webhook routing."
+---
+
+django-meta-whatsapp supports multiple WhatsApp Business Accounts in a single Django project. Each account has its own credentials, inbox, campaigns, and templates. The dashboard includes an account selector that scopes all views — inbox, campaigns, templates, and analytics — to the currently active account.
+
+## WhatsAppAccount Model Fields
+
+Each WhatsApp Business Account is represented by a `WhatsAppAccount` record with the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `CharField` | Friendly label for this account (e.g. `"Business A"`) |
+| `access_token` | `TextField` | Meta permanent or system-user access token |
+| `phone_number_id` | `CharField` | Phone number ID from the Meta developer dashboard |
+| `waba_id` | `CharField` | WhatsApp Business Account ID — required for template sync and In-App Signups |
+| `verify_token` | `CharField` | Per-account webhook verify token, auto-generated as a UUID on creation |
+| `profile_name` | `CharField` | Business profile name, fetched automatically via Graph API on save |
+| `profile_picture_url` | `URLField` | Profile picture URL, fetched automatically via Graph API on save |
+| `default_catalog_id` | `CharField` | Default Meta Commerce Catalog ID for this account |
+| `is_active` | `BooleanField` | Whether this account is active and eligible for webhook matching |
+| `created_at` | `DateTimeField` | Auto-set on creation |
+
+## Creating Accounts
+
+Add a new account through the dashboard at `/whatsapp/settings/accounts/add/`. When you save the form, the package will attempt to fetch the `profile_name` and `profile_picture_url` automatically using the provided `access_token`.
+
+Each account automatically receives a unique UUID as its `verify_token`, which is used to verify its specific webhook subscription with Meta.
+
+## Switching Accounts
+
+The account selector dropdown in the dashboard header lets agents switch between accounts without leaving the current page. Selecting an account POSTs to `/whatsapp/settings/accounts/set-global/`, which stores the chosen account's ID in the Django session:
+
+```python
+request.session["wa_account_id"] = int(account_id)
+```
+
+All views — inbox, conversations, campaigns, templates, and analytics — read `request.session["wa_account_id"]` and filter their querysets accordingly. If no session value is set, views fall back to the first active account found.
+
+## Per-Account Webhook Routing
+
+All accounts share a single webhook URL (`/whatsapp/webhook/`). The webhook view handles routing transparently:
+
+- **Verification (`GET`):** When Meta sends a `hub.verify_token`, the view checks it against all active `WhatsAppAccount.verify_token` values. If none match, it falls back to `WHATSAPP["VERIFY_TOKEN"]` in settings.
+- **Inbound messages (`POST`):** The payload contains a `phone_number_id` in `value.metadata`. The view matches this to the correct `WhatsAppAccount` record and associates all created `WhatsAppMessage` and `WhatsAppConversation` records with that account.
+
+This means you only need to register one webhook URL with Meta, regardless of how many accounts you operate.
+
+## Using Accounts Programmatically
+
+All utility functions in `django_meta_whatsapp.utils` accept an optional `account` parameter. Pass a `WhatsAppAccount` instance to direct API calls to that account's credentials:
+
+```python
+from django_meta_whatsapp.models import WhatsAppAccount
+from django_meta_whatsapp.utils import send_text_message, sync_templates_from_meta
+
+# Get a specific account
+account = WhatsAppAccount.objects.get(name="Business A")
+
+# Send from a specific account
+send_text_message("919876543210", "Hello from Business A!", account=account)
+
+# Sync templates for a specific account
+templates = sync_templates_from_meta(account=account)
+```
+
+## Single-Account Mode
+
+If you only operate one WhatsApp Business Account, you can place credentials directly in your Django `settings.py` under the `WHATSAPP` dictionary. Utility functions fall back to these settings when `account=None` is passed:
+
+```python settings.py
+WHATSAPP = {
+    "API_TOKEN": "EAA...",
+    "PHONE_NUMBER_ID": "1234567890",
+    "WABA_ID": "9876543210",
+    "WEBHOOK_VERIFY_TOKEN": "my_token",
+}
+```
+
+The credential resolution order is:
+
+1. The `WhatsAppAccount` instance passed as `account=`
+2. `WHATSAPP["ACCESS_TOKEN"]` in Django settings
+3. `META_WA_ACCESS_TOKEN` Django setting
+4. `META_WA_ACCESS_TOKEN` environment variable
+
+<Tip>
+Even in single-account setups, creating a `WhatsAppAccount` record via the dashboard is recommended — it gives you a per-account webhook verify token and allows future multi-account expansion without any code changes.
+</Tip>

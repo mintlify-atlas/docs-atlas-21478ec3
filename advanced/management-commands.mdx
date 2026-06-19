@@ -1,0 +1,99 @@
+---
+title: "Django Management Commands for django-meta-whatsapp"
+sidebarTitle: "Management Commands"
+description: "Use the wa_sync_templates management command to sync WhatsApp message templates from Meta into your local database via the command line."
+---
+
+django-meta-whatsapp provides a Django management command for syncing WhatsApp templates from Meta. This is useful for scheduled cron jobs, CI/CD pipelines, and initial setup without touching the dashboard UI.
+
+## wa\_sync\_templates
+
+```bash
+python manage.py wa_sync_templates [--account-id N]
+```
+
+The command performs the following steps for each active `WhatsAppAccount`:
+
+1. Fetches all templates from Meta's Graph API (`GET /{waba_id}/message_templates?limit=100`)
+2. Iterates through every template returned
+3. Extracts the `BODY` component text from the template's `components` list
+4. Creates a new `WhatsAppTemplate` record or updates the existing one, matched by `(account, name, language)` using `update_or_create`
+5. Saves: `meta_template_id`, `category`, `status`, and `body_text`
+
+### Options
+
+| Option | Description |
+|---|---|
+| `--account-id N` | Sync only for the `WhatsAppAccount` with primary key `N`. If omitted, all active accounts are synced. |
+
+### Example Output
+
+```
+Syncing templates for account: My Business ...
+  ✓ Synced 12 templates
+```
+
+If an error occurs for a particular account (e.g. invalid token, missing WABA ID), the command prints the error and continues to the next account.
+
+### Requirements
+
+- `waba_id` must be set on the `WhatsAppAccount` record, or `WHATSAPP["WABA_ID"]` must be set in Django settings
+- The `access_token` must have the `whatsapp_business_management` permission to read `message_templates` for the WABA
+
+## Usage Examples
+
+```bash
+# Sync all active accounts
+python manage.py wa_sync_templates
+
+# Sync only the account with pk=2
+python manage.py wa_sync_templates --account-id 2
+
+# Run as a cron job (daily at 2 AM)
+0 2 * * * /path/to/venv/bin/python /path/to/manage.py wa_sync_templates
+```
+
+## Scheduling with Celery Beat
+
+If your project uses Celery, you can schedule template syncs as a periodic task instead of using cron:
+
+```python settings.py
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "sync-whatsapp-templates": {
+        "task": "myapp.tasks.sync_templates_task",
+        "schedule": crontab(hour=2, minute=0),  # 2 AM daily
+    },
+}
+```
+
+```python myapp/tasks.py
+from celery import shared_task
+from django_meta_whatsapp.models import WhatsAppAccount, WhatsAppTemplate
+from django_meta_whatsapp.utils import sync_templates_from_meta
+
+@shared_task
+def sync_templates_task():
+    for account in WhatsAppAccount.objects.filter(is_active=True):
+        templates = sync_templates_from_meta(account=account)
+        for t in templates:
+            body_c = next((c for c in t.get("components", []) if c["type"] == "BODY"), {})
+            WhatsAppTemplate.objects.update_or_create(
+                account=account,
+                name=t["name"],
+                language=t.get("language", "en"),
+                defaults={
+                    "meta_template_id": t.get("id", ""),
+                    "category": t.get("category", "MARKETING"),
+                    "status": t.get("status", "PENDING"),
+                    "body_text": body_c.get("text", ""),
+                },
+            )
+```
+
+This Celery task replicates the exact logic used by both the management command and the dashboard's **Sync from Meta** button, so you can use whichever mechanism fits your infrastructure.
+
+<Tip>
+The `wa_sync_templates` command is idempotent — safe to run multiple times. It uses `update_or_create` matched on `(account, name, language)`, so re-running it updates existing template records rather than creating duplicates.
+</Tip>

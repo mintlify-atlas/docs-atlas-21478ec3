@@ -1,0 +1,158 @@
+---
+title: "Link Your Django User Model to WhatsApp Contacts"
+sidebarTitle: "User Model"
+description: "Connect your existing Django User model to WhatsAppContact using a profile model, direct queryset, or Django signals — three integration patterns explained."
+---
+
+django-meta-whatsapp stores WhatsApp contacts in its own `WhatsAppContact` model but provides three patterns for linking to your existing Django `User` model — choose the one that fits your architecture.
+
+<Tabs>
+  <Tab title="Profile Model">
+    ## Profile Model (Recommended)
+
+    Create a thin profile model with `OneToOneField` relationships to both `User` and `WhatsAppContact`. This is the most flexible approach as it lets you query in either direction — from a user to their WhatsApp contact, and from a contact back to your application user.
+
+    ```python myapp/models.py
+    from django.conf import settings
+    from django.db import models
+    from django_meta_whatsapp.models import WhatsAppContact
+
+    class UserWhatsAppProfile(models.Model):
+        user = models.OneToOneField(
+            settings.AUTH_USER_MODEL,
+            on_delete=models.CASCADE,
+            related_name="whatsapp_profile"
+        )
+        contact = models.OneToOneField(
+            WhatsAppContact,
+            on_delete=models.SET_NULL,
+            null=True,
+            blank=True,
+            related_name="user_profile"
+        )
+    ```
+
+    Then link the profile on registration or profile update:
+
+    ```python
+    from django_meta_whatsapp.models import WhatsAppContact
+    from myapp.models import UserWhatsAppProfile
+
+    def link_user_to_whatsapp(user, phone_number):
+        contact, _ = WhatsAppContact.objects.get_or_create(
+            phone=phone_number,
+            defaults={"name": user.get_full_name()}
+        )
+        UserWhatsAppProfile.objects.update_or_create(
+            user=user,
+            defaults={"contact": contact}
+        )
+    ```
+
+    Once linked, you can traverse the relationship in both directions:
+
+    ```python
+    # User → Contact
+    contact = request.user.whatsapp_profile.contact
+
+    # Contact → User
+    user = some_contact.user_profile.user
+    ```
+  </Tab>
+
+  <Tab title="Audience Queryset">
+    ## Audience Queryset
+
+    Skip the profile model entirely — return a queryset of your `User` model from a named audience function. This is the lightest-weight approach and requires no schema changes to your existing models.
+
+    ```python myapp/audiences.py
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    def all_active_users():
+        """Return all active users who have a phone number on file."""
+        return User.objects.filter(is_active=True, phone__isnull=False)
+
+    def premium_subscribers():
+        """Premium users only."""
+        return User.objects.filter(is_active=True, tier="premium", phone__isnull=False)
+    ```
+
+    Register your audience functions and tell django-meta-whatsapp which fields hold the phone number and display name:
+
+    ```python settings.py
+    WHATSAPP = {
+        # ...
+        "PHONE_FIELD": "phone",      # attribute name on your User object
+        "NAME_FIELD": "full_name",   # attribute name on your User object
+        "AUDIENCES": {
+            "All Active Users": "myapp.audiences.all_active_users",
+            "Premium Subscribers": "myapp.audiences.premium_subscribers",
+        },
+    }
+    ```
+
+    These audience names appear in the **Campaign creation** form dropdown. When a campaign runs, django-meta-whatsapp calls your function, iterates the returned queryset, and reads `PHONE_FIELD` and `NAME_FIELD` from each object to build the recipient list.
+
+    <Note>
+      Your audience function must return a queryset or iterable of objects that each have the attributes specified in `PHONE_FIELD` and `NAME_FIELD`. Any object — not just `User` — works here.
+    </Note>
+  </Tab>
+
+  <Tab title="Signals Auto-Linking">
+    ## Signals Auto-Linking
+
+    Use Django's `post_save` signal to automatically create or update a `WhatsAppContact` whenever a `User` is saved. This is a passive, always-on sync that keeps your contacts mirror up to date with no extra application logic.
+
+    First, wire up the signal import in your `AppConfig.ready()`:
+
+    ```python myapp/apps.py
+    from django.apps import AppConfig
+
+    class MyAppConfig(AppConfig):
+        name = "myapp"
+
+        def ready(self):
+            import myapp.signals  # noqa
+    ```
+
+    Then define the receiver:
+
+    ```python myapp/signals.py
+    from django.contrib.auth import get_user_model
+    from django.db.models.signals import post_save
+    from django.dispatch import receiver
+    from django_meta_whatsapp.models import WhatsAppContact
+
+    User = get_user_model()
+
+    @receiver(post_save, sender=User)
+    def sync_whatsapp_contact(sender, instance, created, **kwargs):
+        phone = getattr(instance, "phone", None)
+        if not phone:
+            return
+        WhatsAppContact.objects.update_or_create(
+            phone=phone,
+            defaults={"name": instance.get_full_name() or instance.username}
+        )
+    ```
+
+    Every time a `User` is saved (created or updated), the corresponding `WhatsAppContact` is automatically kept in sync. If the user has no phone number, the handler exits early without creating a contact.
+  </Tab>
+</Tabs>
+
+## Choosing a Pattern
+
+<AccordionGroup>
+  <Accordion title="When to use the Profile Model">
+    Best when you need to query in **both directions** — from a contact back to a user, and from a user to their contact. Use this if you need to display the Django user's details in the inbox, or if you want to enforce a strict one-to-one relationship enforced at the database level.
+  </Accordion>
+
+  <Accordion title="When to use the Audience Queryset">
+    Best when you **only need campaign sends** and don't need bi-directional linking. If all you want is to send bulk template messages to a slice of your user base, returning a filtered queryset is the fastest path with zero schema migrations.
+  </Accordion>
+
+  <Accordion title="When to use Signals">
+    Best for **passive sync** where contacts should always mirror your user database. Choose this when you want the `WhatsAppContact` table to automatically stay current as users register, update their profiles, or add phone numbers — without any explicit linking calls in your application code.
+  </Accordion>
+</AccordionGroup>
